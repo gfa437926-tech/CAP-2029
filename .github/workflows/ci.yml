@@ -27,7 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       # The repository currently has no committed package-lock.json.
       # npm install is temporary until a reviewed lockfile is added.
