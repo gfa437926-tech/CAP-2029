@@ -13,11 +13,38 @@ export const apiRouter = Router();
 // Every API route is authenticated. Missing or invalid OIDC/JWT configuration fails closed.
 apiRouter.use(authenticateApiRequest);
 
+const hasNationalDataScope = (claims: WamsAuthClaims) => {
+  const scopes = new Set([
+    ...(typeof claims.scope === 'string' ? claims.scope.split(/\s+/).filter(Boolean) : []),
+    ...(Array.isArray(claims.permissions) ? claims.permissions : [])
+  ]);
+  return scopes.has('wams:data:national');
+};
+
+/** Geographic records are scoped to the governorate asserted by the verified identity token. */
+function governorateScope(requestedGovernorate: (req: import('express').Request) => string | undefined) {
+  return (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction): void => {
+    const claims = res.locals.auth as WamsAuthClaims;
+    if (hasNationalDataScope(claims)) {
+      next();
+      return;
+    }
+    const tokenGovernorate = typeof claims.governorate === 'string' ? claims.governorate.trim() : '';
+    const requested = requestedGovernorate(req)?.trim();
+    if (!tokenGovernorate || (requested && requested !== tokenGovernorate && requested !== 'all')) {
+      res.status(403).json({ status: 'error', code: 'GEOGRAPHIC_SCOPE_DENIED', message: 'Access is limited to the assigned governorate' });
+      return;
+    }
+    next();
+  };
+}
+
 // ==========================================
-// 1. WAMS Operational Data (read-only scopes)
+// 1. WAMS Operational Data
 // ==========================================
 
-apiRouter.get('/wams/telemetry', requireApiScopes('wams:telemetry:read'), (req, res) => {
+// National snapshot contains multiple sectors and governorates; require explicit national authority.
+apiRouter.get('/wams/telemetry', requireApiScopes('wams:telemetry:read', 'wams:data:national'), (req, res) => {
   try {
     const snapshot = wamsDataStore.getNationalOperationalSnapshot();
     res.json({ status: 'success', data: snapshot });
@@ -26,10 +53,17 @@ apiRouter.get('/wams/telemetry', requireApiScopes('wams:telemetry:read'), (req, 
   }
 });
 
-apiRouter.get('/wams/weather', requireApiScopes('wams:weather:read'), (req, res) => {
-  const gov = typeof req.query.governorate === 'string' ? req.query.governorate : undefined;
-  res.json({ status: 'success', data: wamsDataStore.getWeatherObservations(gov) });
-});
+apiRouter.get('/wams/weather',
+  requireApiScopes('wams:weather:read'),
+  governorateScope(req => typeof req.query.governorate === 'string' ? req.query.governorate : undefined),
+  (req, res) => {
+    const claims = res.locals.auth as WamsAuthClaims;
+    const gov = hasNationalDataScope(claims)
+      ? (typeof req.query.governorate === 'string' ? req.query.governorate : undefined)
+      : claims.governorate;
+    res.json({ status: 'success', data: wamsDataStore.getWeatherObservations(gov) });
+  }
+);
 
 apiRouter.get('/wams/seismic', requireApiScopes('wams:seismic:read'), (_req, res) => {
   res.json({ status: 'success', data: wamsDataStore.getSeismicEvents(10) });
@@ -39,13 +73,29 @@ apiRouter.get('/wams/dams', requireApiScopes('wams:dams:read'), (_req, res) => {
   res.json({ status: 'success', data: wamsDataStore.getDamsStatus() });
 });
 
-apiRouter.get('/wams/hospitals', requireApiScopes('wams:hospitals:read'), (_req, res) => {
-  res.json({ status: 'success', data: wamsDataStore.getHospitalsReadiness() });
-});
+apiRouter.get('/wams/hospitals',
+  requireApiScopes('wams:hospitals:read'),
+  governorateScope(req => typeof req.query.governorate === 'string' ? req.query.governorate : undefined),
+  (req, res) => {
+    const claims = res.locals.auth as WamsAuthClaims;
+    const gov = hasNationalDataScope(claims)
+      ? (typeof req.query.governorate === 'string' ? req.query.governorate : undefined)
+      : claims.governorate;
+    res.json({ status: 'success', data: wamsDataStore.getHospitalsReadiness(gov) });
+  }
+);
 
-apiRouter.get('/wams/roads', requireApiScopes('wams:roads:read'), (_req, res) => {
-  res.json({ status: 'success', data: wamsDataStore.getRoadHazards() });
-});
+apiRouter.get('/wams/roads',
+  requireApiScopes('wams:roads:read'),
+  governorateScope(req => typeof req.query.governorate === 'string' ? req.query.governorate : undefined),
+  (req, res) => {
+    const claims = res.locals.auth as WamsAuthClaims;
+    const gov = hasNationalDataScope(claims)
+      ? (typeof req.query.governorate === 'string' ? req.query.governorate : undefined)
+      : claims.governorate;
+    res.json({ status: 'success', data: wamsDataStore.getRoadHazards(gov) });
+  }
+);
 
 apiRouter.get('/wams/aviation', requireApiScopes('wams:aviation:read'), (_req, res) => {
   res.json({ status: 'success', data: wamsDataStore.getAviationStatus() });
