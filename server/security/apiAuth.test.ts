@@ -187,6 +187,20 @@ describe('WAMS API authentication and authorization', () => {
     expect(response.status).toBe(403);
   });
 
+  it('rejects legacy static tokens and spoofed identity headers', async () => {
+    const response = await fetch(baseUrl + '/api/wams/telemetry?token=WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029', {
+      headers: {
+        'x-wams-auth-token': 'WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029',
+        'x-wams-client': 'wams-dashboard-ui',
+        'x-user-role': 'NationalAdministrator',
+        'x-user-governorate': 'دمشق',
+        'x-user-clearance': 'top_secret'
+      }
+    });
+    expect(response.status).toBe(401);
+    expect((await response.json()).code).toBe('UNAUTHENTICATED');
+  });
+
   it('rejects tokens signed by an untrusted key', async () => {
     const { privateKey: attackerKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
