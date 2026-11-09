@@ -31,19 +31,35 @@ function token(scopes: string[], overrides: Record<string, unknown> = {}): strin
   return input + '.' + signer.sign(privateKey).toString('base64url');
 }
 
-const endpoints: Array<{ method: 'GET' | 'POST'; path: string; scope: string; body?: unknown }> = [
+const endpoints: Array<{ method: 'GET' | 'POST'; path: string; scope: string; body?: unknown; expectedStatus?: number }> = [
+  { method: 'POST', path: '/api/wams/energy/grid-alert', scope: 'wams:energy:operate wams:data:national', body: { facilityId: 'test-facility' } },
+  { method: 'POST', path: '/api/wams/telecom/mesh-resilience', scope: 'wams:telecom:operate wams:data:national', body: { nodes: [] } },
+  { method: 'POST', path: '/api/wams/water/dam-cascade', scope: 'wams:hydrology:operate wams:data:national', body: { assessments: [] } },
   { method: 'GET', path: '/api/wams/telemetry', scope: 'wams:telemetry:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/hydrology/flash-flood', scope: 'wams:hydrology:operate wams:data:national', body: {} },
+  { method: 'POST', path: '/api/wams/hydrology/dam-eval', scope: 'wams:hydrology:operate wams:data:national', body: {} },
   { method: 'GET', path: '/api/wams/weather', scope: 'wams:weather:read' },
-  { method: 'GET', path: '/api/wams/seismic', scope: 'wams:seismic:read' },
-  { method: 'GET', path: '/api/wams/dams', scope: 'wams:dams:read' },
+  { method: 'GET', path: '/api/wams/seismic', scope: 'wams:seismic:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/dams', scope: 'wams:dams:read wams:data:national' },
   { method: 'GET', path: '/api/wams/hospitals', scope: 'wams:hospitals:read' },
+  { method: 'POST', path: '/api/wams/health/hospital-stress', scope: 'wams:health:operate wams:data:national', body: { hospitalId: 'test' } },
+  { method: 'POST', path: '/api/wams/health/evacuation-plan', scope: 'wams:health:operate wams:data:national', body: { hospitalId: 'test', patientCount: 1 } },
   { method: 'GET', path: '/api/wams/roads', scope: 'wams:roads:read' },
-  { method: 'GET', path: '/api/wams/aviation', scope: 'wams:aviation:read' },
-  { method: 'GET', path: '/api/wams/ports', scope: 'wams:ports:read' },
-  { method: 'GET', path: '/api/wams/agriculture', scope: 'wams:agriculture:read' },
+  { method: 'POST', path: '/api/wams/traffic/road-alert', scope: 'wams:traffic:operate wams:data:national', body: { roadId: 'test' } },
+  { method: 'POST', path: '/api/wams/industrial/hazard-alert', scope: 'wams:industrial:operate wams:data:national', body: { hazardId: 'test' } },
+  { method: 'GET', path: '/api/wams/aviation', scope: 'wams:aviation:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/aviation/metar-analysis', scope: 'wams:aviation:operate wams:data:national', body: { icaoCode: 'test' } },
+  { method: 'GET', path: '/api/wams/ports', scope: 'wams:maritime:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/maritime/port-alert', scope: 'wams:maritime:operate wams:data:national', body: { portId: 'test' } },
+  { method: 'GET', path: '/api/wams/agriculture', scope: 'wams:agriculture:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/sector/meteorology', scope: 'wams:sector:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/spatial-bbox', scope: 'wams:spatial:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/ingest/weather', scope: 'wams:weather:ingest wams:data:national', body: {}, expectedStatus: 400 },
+  { method: 'POST', path: '/api/wams/agriculture/frost-risk', scope: 'wams:agriculture:operate wams:data:national', body: { zoneId: 'test' } },
   { method: 'POST', path: '/api/ai/query', scope: 'ai:query:operations', body: { prompt: 'اختبار مصادقة فقط', sector: 'operations' } },
-  { method: 'POST', path: '/api/ai/cascading-risk', scope: 'ai:cascading-risk:read', body: { triggerHazard: 'test' } },
+  { method: 'POST', path: '/api/ai/cascading-risk', scope: 'ai:cascading-risk:read wams:data:national', body: { triggerHazard: 'test' } },
   { method: 'GET', path: '/api/ai/audit-logs', scope: 'ai:audit:read' },
+  { method: 'GET', path: '/api/wams/audit-chain/verify', scope: 'wams:audit:verify' },
   { method: 'GET', path: '/api/ai/health', scope: 'system:health:read' }
 ];
 
@@ -98,7 +114,7 @@ describe('WAMS API authentication and authorization', () => {
       },
       body: endpoint.body ? JSON.stringify(endpoint.body) : undefined
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(endpoint.expectedStatus ?? 200);
   });
 
   it('ignores client-supplied AI identity and audits the verified token subject', async () => {
