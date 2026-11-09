@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { wamsDataStore } from './wamsDataStore';
 import { geminiGateway } from './geminiGateway';
-import { authenticateApiRequest, requireApiScopes, type WamsAuthClaims } from './security/apiAuth';
+import { authenticateApiRequest, requireApiScopes, requireAnyApiScopes, type WamsAuthClaims } from './security/apiAuth';
 
 export const apiRouter = Router();
 
@@ -63,7 +63,18 @@ apiRouter.get('/wams/agriculture', requireApiScopes('wams:agriculture:read'), (_
 // 2. Gemini AI Intelligence Layer
 // ==========================================
 
-apiRouter.post('/ai/query', requireApiScopes('ai:query'), async (req, res) => {
+const AI_QUERY_SECTORS = new Set([
+  'meteorology', 'geological', 'wildfire', 'hydrology', 'health',
+  'aviation', 'maritime', 'traffic', 'agriculture', 'operations'
+]);
+
+apiRouter.post('/ai/query', (req, res, next) => {
+  const sector = typeof req.body?.sector === 'string' ? req.body.sector : 'operations';
+  if (!AI_QUERY_SECTORS.has(sector)) {
+    return res.status(400).json({ status: 'error', code: 'INVALID_SECTOR', message: 'Unsupported AI sector' });
+  }
+  return requireAnyApiScopes(`ai:query:${sector}`, 'ai:query:national')(req, res, next);
+}, async (req, res) => {
   try {
     const { prompt, sector = 'operations' } = req.body ?? {};
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) {
