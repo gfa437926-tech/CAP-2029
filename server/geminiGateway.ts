@@ -4,6 +4,7 @@
  */
 
 import { GoogleGenAI, Type } from '@google/genai';
+import { createHash } from 'crypto';
 import { wamsDataStore } from './wamsDataStore';
 
 export interface EvidenceMetadata {
@@ -14,8 +15,10 @@ export interface EvidenceMetadata {
   missingDataFlags: string[];
   scientificLimitations: string[];
   confidenceScorePct: number; // 0 - 100
+  uncertaintyScorePct?: number; // 0 - 100 (100 - confidence)
   modelVersion: string;
   isAdvisoryOnly: boolean;
+  redactedSensitiveFieldsCount?: number;
 }
 
 export interface WAMSStructuredIntelligence {
@@ -25,6 +28,7 @@ export interface WAMSStructuredIntelligence {
     value: string;
     source: string;
     recordId: string;
+    isVerified: boolean;
   }[];
   scientificModelResults: {
     modelName: string;
@@ -58,6 +62,8 @@ export interface AIAuditRecord {
   confidenceScorePct: number;
   executionStatus: 'success' | 'fallback_rule_based' | 'sanitized_blocked';
   latencyMs: number;
+  previousHash: string;
+  entryHash: string;
 }
 
 class GeminiGatewayService {
@@ -71,22 +77,130 @@ class GeminiGatewayService {
   }
 
   /**
-   * Appends an immutable audit log entry
+   * Generates a cryptographic SHA-256 hash for audit record
    */
-  private logAudit(entry: Omit<AIAuditRecord, 'id' | 'timestamp'>) {
+  private computeHash(payload: string): string {
+    return createHash('sha256').update(payload).digest('hex');
+  }
+
+  /**
+   * Appends an immutable, hash-chained audit log entry (Fix 6)
+   */
+  private logAudit(entry: Omit<AIAuditRecord, 'id' | 'timestamp' | 'previousHash' | 'entryHash'>) {
+    const timestamp = new Date().toISOString();
+    const id = `AUDIT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const previousHash = this.auditLogs.length > 0 ? this.auditLogs[0].entryHash : 'GENESIS_BLOCK_WAMS_2029';
+
+    const rawPayload = `${id}|${timestamp}|${entry.queryOrSector}|${entry.userId}|${entry.recordsReadCount}|${previousHash}`;
+    const entryHash = this.computeHash(rawPayload);
+
     const record: AIAuditRecord = {
-      id: `AUDIT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      timestamp: new Date().toISOString(),
-      ...entry
+      id,
+      timestamp,
+      ...entry,
+      previousHash,
+      entryHash
     };
+
     this.auditLogs.unshift(record);
-    if (this.auditLogs.length > 200) {
+    if (this.auditLogs.length > 300) {
       this.auditLogs.pop();
     }
   }
 
+  /**
+   * Verifies the cryptographic integrity of the audit log chain (Fix 6)
+   */
+  public verifyAuditChainIntegrity(): { valid: boolean; recordsChecked: number; tamperedId?: string } {
+    if (this.auditLogs.length === 0) return { valid: true, recordsChecked: 0 };
+
+    for (let i = 0; i < this.auditLogs.length - 1; i++) {
+      const current = this.auditLogs[i];
+      const previous = this.auditLogs[i + 1];
+
+      // Check link
+      if (current.previousHash !== previous.entryHash) {
+        return { valid: false, recordsChecked: this.auditLogs.length, tamperedId: current.id };
+      }
+
+      // Check self hash
+      const rawPayload = `${current.id}|${current.timestamp}|${current.queryOrSector}|${current.userId}|${current.recordsReadCount}|${current.previousHash}`;
+      if (this.computeHash(rawPayload) !== current.entryHash) {
+        return { valid: false, recordsChecked: this.auditLogs.length, tamperedId: current.id };
+      }
+    }
+
+    return { valid: true, recordsChecked: this.auditLogs.length };
+  }
+
   public getAuditLogs(): AIAuditRecord[] {
     return this.auditLogs;
+  }
+
+  /**
+   * Redacts sensitive or restricted data before constructing egress grounding prompts (Fix 4)
+   */
+  private sanitizeEgressGroundingData(snapshot: any, clearanceLevel: string = 'restricted'): { sanitizedSnapshot: any; redactedFieldsCount: number } {
+    let redactedCount = 0;
+    const cloned = JSON.parse(JSON.stringify(snapshot));
+
+    // If clearance is not sensitive or top_secret, mask internal SCADA inflow/outflow numbers & medical fuel reserves
+    if (clearanceLevel !== 'sensitive' && clearanceLevel !== 'top_secret') {
+      if (Array.isArray(cloned.damsStatus)) {
+        cloned.damsStatus.forEach((dam: any) => {
+          if (dam.dataClassification === 'sensitive') {
+            dam.inflowM3s = '[REDACTED_SENSITIVE_CLASSIFIED]';
+            dam.outflowM3s = '[REDACTED_SENSITIVE_CLASSIFIED]';
+            redactedCount += 2;
+          }
+        });
+      }
+
+      if (Array.isArray(cloned.hospitalsReadiness)) {
+        cloned.hospitalsReadiness.forEach((hosp: any) => {
+          if (hosp.dataClassification === 'sensitive') {
+            hosp.generatorFuelDays = '[REDACTED_CLASSIFIED]';
+            redactedCount += 1;
+          }
+        });
+      }
+    }
+
+    return { sanitizedSnapshot: cloned, redactedFieldsCount: redactedCount };
+  }
+
+  /**
+   * Cross-verifies every evidence record in Gemini's response against true data store records (Fix 5)
+   */
+  private verifyAndFilterEvidence(parsed: WAMSStructuredIntelligence): WAMSStructuredIntelligence {
+    let hallucinationCount = 0;
+
+    if (Array.isArray(parsed.operationalEvidence)) {
+      parsed.operationalEvidence = parsed.operationalEvidence.map(ev => {
+        const exists = wamsDataStore.verifyRecordIdExists(ev.recordId);
+        if (!exists) {
+          hallucinationCount++;
+          return {
+            ...ev,
+            recordId: `[UNVERIFIED_ID_PURGED: ${ev.recordId}]`,
+            isVerified: false
+          };
+        }
+        return {
+          ...ev,
+          isVerified: true
+        };
+      });
+    }
+
+    if (hallucinationCount > 0) {
+      parsed.evidence.confidenceScorePct = Math.max(10, parsed.evidence.confidenceScorePct - (hallucinationCount * 15));
+      parsed.evidence.missingDataFlags.push(`تم استبعاد ${hallucinationCount} مراجع استدلالية غير مثبتة في سجلات قواعد البيانات الحقيقية.`);
+    }
+
+    parsed.evidence.uncertaintyScorePct = Math.max(0, 100 - (parsed.evidence.confidenceScorePct || 90));
+
+    return parsed;
   }
 
   /**
@@ -116,161 +230,6 @@ class GeminiGatewayService {
     }
 
     return { isSafe: true, sanitized: prompt.trim() };
-  }
-
-  /**
-   * Pre-approved read-only tool declarations for function calling
-   */
-  private getFunctionDeclarations() {
-    return [
-      {
-        name: 'get_weather_observations',
-        description: 'Read real verified meteorological telemetry from Syrian AWS stations.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            governorate: { type: Type.STRING, description: 'Optional governorate filter e.g. دمشق, اللاذقية, طرطوس' }
-          }
-        }
-      },
-      {
-        name: 'get_earthquake_reports',
-        description: 'Read verified records from the Syrian National Seismological Network.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            limit: { type: Type.INTEGER, description: 'Max events to retrieve (default 5)' }
-          }
-        }
-      },
-      {
-        name: 'get_wildfire_incidents',
-        description: 'Read active satellite VIIRS/MODIS thermal fire hotspots in forest regions.',
-        parameters: { type: Type.OBJECT, properties: {} }
-      },
-      {
-        name: 'get_flood_risk_areas',
-        description: 'Read dams telemetry, water levels, inflow/outflow, and downstream flood risks.',
-        parameters: { type: Type.OBJECT, properties: {} }
-      },
-      {
-        name: 'get_hospital_readiness',
-        description: 'Read emergency ICU bed availability, oxygen hours, and blood bank status.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            governorate: { type: Type.STRING, description: 'Governorate name' }
-          }
-        }
-      },
-      {
-        name: 'get_airport_weather_status',
-        description: 'Read real METAR weather records and runway operational statuses for Syrian airports.',
-        parameters: { type: Type.OBJECT, properties: {} }
-      },
-      {
-        name: 'get_port_conditions',
-        description: 'Read sea state, wave heights, and maritime navigation statuses for Latakia and Tartus ports.',
-        parameters: { type: Type.OBJECT, properties: {} }
-      },
-      {
-        name: 'get_road_hazards',
-        description: 'Read mountain road closures, flood inundations, and rockfall hazards.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            governorate: { type: Type.STRING, description: 'Governorate name' }
-          }
-        }
-      },
-      {
-        name: 'get_agricultural_risk',
-        description: 'Read frost risk tiers, crop vulnerability, and drought indices for Syrian agricultural zones.',
-        parameters: { type: Type.OBJECT, properties: {} }
-      }
-    ];
-  }
-
-  /**
-   * Executes pre-approved read-only tools safely on backend
-   */
-  private executeToolLocally(toolName: string, args: any): { toolResult: any; recordCount: number; sources: string[] } {
-    switch (toolName) {
-      case 'get_weather_observations': {
-        const obs = wamsDataStore.getWeatherObservations(args?.governorate);
-        return {
-          toolResult: obs,
-          recordCount: obs.length,
-          sources: obs.map(o => `${o.stationId} (${o.stationNameAr})`)
-        };
-      }
-      case 'get_earthquake_reports': {
-        const eq = wamsDataStore.getSeismicEvents(args?.limit || 5);
-        return {
-          toolResult: eq,
-          recordCount: eq.length,
-          sources: eq.map(e => `${e.eventId} (${e.faultSystemAr})`)
-        };
-      }
-      case 'get_wildfire_incidents': {
-        const wf = wamsDataStore.getWildfireIncidents();
-        return {
-          toolResult: wf,
-          recordCount: wf.length,
-          sources: wf.map(f => `${f.incidentId} (${f.locationAr})`)
-        };
-      }
-      case 'get_flood_risk_areas': {
-        const dams = wamsDataStore.getDamsStatus();
-        return {
-          toolResult: dams,
-          recordCount: dams.length,
-          sources: dams.map(d => `${d.damId} (${d.damNameAr})`)
-        };
-      }
-      case 'get_hospital_readiness': {
-        const hosp = wamsDataStore.getHospitalsReadiness(args?.governorate);
-        return {
-          toolResult: hosp,
-          recordCount: hosp.length,
-          sources: hosp.map(h => `${h.hospitalId} (${h.nameAr})`)
-        };
-      }
-      case 'get_airport_weather_status': {
-        const apt = wamsDataStore.getAviationStatus();
-        return {
-          toolResult: apt,
-          recordCount: apt.length,
-          sources: apt.map(a => `${a.icaoCode} (${a.airportNameAr})`)
-        };
-      }
-      case 'get_port_conditions': {
-        const ports = wamsDataStore.getPortConditions();
-        return {
-          toolResult: ports,
-          recordCount: ports.length,
-          sources: ports.map(p => `${p.portId} (${p.portNameAr})`)
-        };
-      }
-      case 'get_road_hazards': {
-        const roads = wamsDataStore.getRoadHazards(args?.governorate);
-        return {
-          toolResult: roads,
-          recordCount: roads.length,
-          sources: roads.map(r => `${r.roadId} (${r.highwayNameAr})`)
-        };
-      }
-      case 'get_agricultural_risk': {
-        const agri = wamsDataStore.getAgriculturalRisks();
-        return {
-          toolResult: agri,
-          recordCount: agri.length,
-          sources: agri.map(a => `${a.zoneId} (${a.zoneNameAr})`)
-        };
-      }
-      default:
-        return { toolResult: null, recordCount: 0, sources: [] };
-    }
   }
 
   /**
@@ -310,9 +269,9 @@ class GeminiGatewayService {
       return {
         summaryAr: `وفقاً لقراءات شبكة محطات الأرصاد المؤتمتة (AWS) اللحظية، تشهد المنطقة الساحلية فعالية جوية عالية، حيث سجلت ${highestRain.stationNameAr} أعلى هطول مطري تراكمي بلغ ${highestRain.rainfallMm24h} ملم، مع رياح عاتية في ${highestWind.stationNameAr} وصلت هباتها إلى ${highestWind.windGustKmh} كم/سا.`,
         operationalEvidence: [
-          { label: 'أعلى هطول مطري 24 ساعة', value: `${highestRain.rainfallMm24h} ملم`, source: highestRain.stationNameAr, recordId: highestRain.stationId },
-          { label: 'أعلى هبة رياح مرصودة', value: `${highestWind.windGustKmh} كم/سا (اتجاه ${highestWind.windDirectionDeg}°)`, source: highestWind.stationNameAr, recordId: highestWind.stationId },
-          { label: 'أدنى رؤية أفقية مسجلة', value: '1.5 كم (عاصفة غبارية بالبادية)', source: 'محطة دير الزور البادية', recordId: 'AWS-DZ-07' }
+          { label: 'أعلى هطول مطري 24 ساعة', value: `${highestRain.rainfallMm24h} ملم`, source: highestRain.stationNameAr, recordId: highestRain.stationId, isVerified: true },
+          { label: 'أعلى هبة رياح مرصودة', value: `${highestWind.windGustKmh} كم/سا (اتجاه ${highestWind.windDirectionDeg}°)`, source: highestWind.stationNameAr, recordId: highestWind.stationId, isVerified: true },
+          { label: 'أدنى رؤية أفقية مسجلة', value: '1.5 كم (عاصفة غبارية بالبادية)', source: 'محطة دير الزور البادية', recordId: 'AWS-DZ-07', isVerified: true }
         ],
         scientificModelResults: [
           { modelName: 'WRF-ARW 3km National Grid', metric: 'مؤشر عدم الاستقرار الجوي الكامن (CAPE)', calculatedValue: '1420 J/kg', significance: 'خلايا رعدية ركامية نشطة فوق الساحل وجبال القلمون' },
@@ -345,9 +304,9 @@ class GeminiGatewayService {
       return {
         summaryAr: `أظهرت سجلات الشبكة الوطنية للرصد الزلزالي تسجيل حدث زلزالي بقوة ${latestSeis.magnitudeMl} درجات على مقياس ريختر على ${latestSeis.faultSystemAr} بعمق ${latestSeis.depthKm} كم، مع فارق زمني لوصول موجات P بلغ ${latestSeis.pWaveArrivalSec} ثوانٍ.`,
         operationalEvidence: [
-          { label: 'المقدار والعمق', value: `M ${latestSeis.magnitudeMl} · عمق ${latestSeis.depthKm} كم`, source: latestSeis.nearestStation, recordId: latestSeis.eventId },
-          { label: 'تسارع الأرض الذروي (PGA)', value: `${latestSeis.peakGroundAccelG} g (شدة ${latestSeis.mmiIntensity})`, source: 'شبكة محطات التسارع الرقمي', recordId: latestSeis.eventId },
-          { label: 'الهزات الارتدادية المسجلة', value: `${latestSeis.aftershockCount} هزات ميكروية أقل من 2.0`, source: 'مرصد مصياف الرقمي', recordId: latestSeis.eventId }
+          { label: 'المقدار والعمق', value: `M ${latestSeis.magnitudeMl} · عمق ${latestSeis.depthKm} كم`, source: latestSeis.nearestStation, recordId: latestSeis.eventId, isVerified: true },
+          { label: 'تسارع الأرض الذروي (PGA)', value: `${latestSeis.peakGroundAccelG} g (شدة ${latestSeis.mmiIntensity})`, source: 'شبكة محطات التسارع الرقمي', recordId: latestSeis.eventId, isVerified: true },
+          { label: 'الهزات الارتدادية المسجلة', value: `${latestSeis.aftershockCount} هزات ميكروية أقل من 2.0`, source: 'مرصد مصياف الرقمي', recordId: latestSeis.eventId, isVerified: true }
         ],
         scientificModelResults: [
           { modelName: 'ShakeMap Syrian Atlas Engine', metric: 'نصف قطر دائرة الشعور بالإهتزاز', calculatedValue: '45 كم', significance: 'شعور خفيف دون أي أثر إنشائي للمباني' },
@@ -379,9 +338,9 @@ class GeminiGatewayService {
       return {
         summaryAr: `رصدت المنظومة الفضائية بؤرة حرارية في ${fire.locationAr} بطاقة إشعاع حراري ${fire.fireRadiativePowerMw} MW ونسبة ثقة ${fire.confidencePct}%، مع سرعة انتشار تقدر بـ ${fire.spreadRateMPerMin} م/دقيقة باتجاه ${fire.estimatedSpreadDirectionDeg}°.`,
         operationalEvidence: [
-          { label: 'طاقة الإشعاع الحراري FRP', value: `${fire.fireRadiativePowerMw} ميغاواط (ثقة ${fire.confidencePct}%)`, source: fire.detectionSource, recordId: fire.incidentId },
-          { label: 'طبيعة الوقود والانحدار', value: `${fire.fuelTypeAr} (انحدار ${fire.slopeDegrees}°)`, source: 'كتالوج الغطاء النباتي الوطني', recordId: fire.incidentId },
-          { label: 'القرى المهددة بالمسار', value: fire.threatenedVillages.join('، '), source: 'سجل السكان المكاني', recordId: fire.incidentId }
+          { label: 'طاقة الإشعاع الحراري FRP', value: `${fire.fireRadiativePowerMw} ميغاواط (ثقة ${fire.confidencePct}%)`, source: fire.detectionSource, recordId: fire.incidentId, isVerified: true },
+          { label: 'طبيعة الوقود والانحدار', value: `${fire.fuelTypeAr} (انحدار ${fire.slopeDegrees}°)`, source: 'كتالوج الغطاء النباتي الوطني', recordId: fire.incidentId, isVerified: true },
+          { label: 'القرى المهددة بالمسار', value: fire.threatenedVillages.join('، '), source: 'سجل السكان المكاني', recordId: fire.incidentId, isVerified: true }
         ],
         scientificModelResults: [
           { modelName: 'Rothermel Fire Spread Numerical Model', metric: 'معدل التمدد المحسوب', calculatedValue: `${fire.spreadRateMPerMin} م/دقيقة`, significance: 'انتشار سريع مدفوع بالرياح والانحدار التضاريسي' }
@@ -410,9 +369,9 @@ class GeminiGatewayService {
     return {
       summaryAr: `تقرير الموقف الاستشاري الوطني لغرفة العمليات المركزية: رصد فعاليات جوية نشطة في المنطقة الساحلية مع أمطار غزيرة واضطراب بحري، واستقرار نسبي في الأحواض المائية وسدود الفرات، مع جاهزية مشافي مرتفعة (استيعاب أسرة 85%).`,
       operationalEvidence: [
-        { label: 'المحطات الجوية النشطة', value: `${snapshot.weatherStationsCount} محطات تعمل بكفاءة 100%`, source: 'شبكة AWS الوطنية', recordId: 'CORPUS-AWS' },
-        { label: 'حالة الموانئ البحرية', value: 'تعليق الملاحة في اللاذقية وتقييد الصيد في طرطوس', source: 'المديرية العامة للموانئ', recordId: 'PORT-LAT-01' },
-        { label: 'إشغال المشافي الوطنية', value: 'احتياطي أكسجين يتجاوز 72 ساعة في مشافي دمشق والساحل', source: 'سجل جاهزية المشافي', recordId: 'HOSP-ALL' }
+        { label: 'المحطات الجوية النشطة', value: `${snapshot.weatherStationsCount} محطات تعمل بكفاءة 100%`, source: 'شبكة AWS الوطنية', recordId: 'CORPUS-AWS', isVerified: true },
+        { label: 'حالة الموانئ البحرية', value: 'تعليق الملاحة في اللاذقية وتقييد الصيد في طرطوس', source: 'المديرية العامة للموانئ', recordId: 'PORT-LAT-01', isVerified: true },
+        { label: 'إشغال المشافي الوطنية', value: 'احتياطي أكسجين يتجاوز 72 ساعة في مشافي دمشق والساحل', source: 'سجل جاهزية المشافي', recordId: 'HOSP-ALL', isVerified: true }
       ],
       scientificModelResults: [
         { modelName: 'National Multi-Hazard Correlation Engine', metric: 'معامل الخطر التراكمي الوطني', calculatedValue: '5.8 / 10 (متوسط)', significance: 'تركز المخاطر في المحافظات الغربية والساحلية' }
@@ -439,9 +398,9 @@ class GeminiGatewayService {
 
   /**
    * Main analytical entry point: Analyzes prompt with Gemini API using Google GenAI SDK
-   * with full evidence validation and local tool grounding.
+   * with full evidence validation, data sanitization, and local tool grounding.
    */
-  public async analyzeWithGrounding(prompt: string, sector: string = 'operations', userContext?: { role: string; governorate: string; userId?: string }): Promise<WAMSStructuredIntelligence> {
+  public async analyzeWithGrounding(prompt: string, sector: string = 'operations', userContext?: { role: string; governorate: string; clearanceLevel?: string; userId?: string }): Promise<WAMSStructuredIntelligence> {
     const startTime = Date.now();
     const sanitization = this.sanitizeInput(prompt);
 
@@ -478,30 +437,37 @@ class GeminiGatewayService {
       };
     }
 
+    // Get Raw Snapshot and apply Classification & Redaction Filter (Fix 4)
+    const rawSnapshot = wamsDataStore.getNationalOperationalSnapshot();
+    const { sanitizedSnapshot, redactedFieldsCount } = this.sanitizeEgressGroundingData(rawSnapshot, userContext?.clearanceLevel || 'restricted');
+
     // If Gemini API Key is missing or invalid, route to our resilient Grounded Rule-Based Engine
     if (!this.apiKey) {
       const fallbackResult = this.generateGroundedFallbackAnalysis(sector, prompt);
+      fallbackResult.evidence.redactedSensitiveFieldsCount = redactedFieldsCount;
+      const verifiedFallback = this.verifyAndFilterEvidence(fallbackResult);
+
       this.logAudit({
         queryOrSector: sector,
         userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
-        toolsInvoked: fallbackResult.evidence.dataSourcesUsed,
-        recordsReadCount: fallbackResult.evidence.recordsEvaluatedCount,
+        toolsInvoked: verifiedFallback.evidence.dataSourcesUsed,
+        recordsReadCount: verifiedFallback.evidence.recordsEvaluatedCount,
         tokensUsedEstimate: 0,
-        confidenceScorePct: fallbackResult.evidence.confidenceScorePct,
+        confidenceScorePct: verifiedFallback.evidence.confidenceScorePct,
         executionStatus: 'fallback_rule_based',
         latencyMs: Date.now() - startTime
       });
-      return fallbackResult;
+
+      return verifiedFallback;
     }
 
     try {
       const ai = new GoogleGenAI();
-      const snapshot = wamsDataStore.getNationalOperationalSnapshot();
 
       const groundingContext = `
 بيانات منظومة WAMS التشغيلية المعتمدة اللحظية (المصدر الوحيد للحقائق):
-${JSON.stringify(snapshot, null, 2)}
+${JSON.stringify(sanitizedSnapshot, null, 2)}
 `;
 
       const structuredPrompt = `
@@ -553,90 +519,125 @@ ${JSON.stringify(snapshot, null, 2)}
       parsed.evidence = {
         ...parsed.evidence,
         generatedAt: new Date().toISOString(),
-        dataSourcesUsed: snapshot.activeWeatherObservations.slice(0, 5).map(s => s.stationId),
-        recordsEvaluatedCount: snapshot.weatherStationsCount + snapshot.latestSeismicEvents.length + snapshot.activeWildfires.length,
+        dataSourcesUsed: sanitizedSnapshot.activeWeatherObservations.slice(0, 5).map((s: any) => s.stationId),
+        recordsEvaluatedCount: sanitizedSnapshot.weatherStationsCount + sanitizedSnapshot.latestSeismicEvents.length + sanitizedSnapshot.activeWildfires.length,
         modelVersion: 'gemini-3.8-flash (Verified WAMS Gateway)',
-        isAdvisoryOnly: true
+        isAdvisoryOnly: true,
+        redactedSensitiveFieldsCount: redactedFieldsCount
       };
+
+      // Perform strict evidence verification & hallucination purging (Fix 5)
+      const verifiedResult = this.verifyAndFilterEvidence(parsed);
 
       this.logAudit({
         queryOrSector: sector,
         userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
-        toolsInvoked: parsed.evidence.dataSourcesUsed,
-        recordsReadCount: parsed.evidence.recordsEvaluatedCount,
+        toolsInvoked: verifiedResult.evidence.dataSourcesUsed,
+        recordsReadCount: verifiedResult.evidence.recordsEvaluatedCount,
         tokensUsedEstimate: response.usageMetadata?.totalTokenCount || 450,
-        confidenceScorePct: parsed.evidence.confidenceScorePct || 95,
+        confidenceScorePct: verifiedResult.evidence.confidenceScorePct || 95,
         executionStatus: 'success',
         latencyMs: Date.now() - startTime
       });
 
-      return parsed;
+      return verifiedResult;
     } catch (err: any) {
       console.error('[GeminiGateway] API invocation error, switching to Grounded Fallback Engine:', err?.message || err);
       const fallback = this.generateGroundedFallbackAnalysis(sector, prompt);
       fallback.summaryAr += ` (ملاحظة: تم توليد التحليل عبر محرك القواعد الجيوديسية المحلي نظراً لتعذر الاتصال بـ Gemini API: ${err?.message || 'خطأ اتصال'}).`;
-      
+      fallback.evidence.redactedSensitiveFieldsCount = redactedFieldsCount;
+      const verifiedFallback = this.verifyAndFilterEvidence(fallback);
+
       this.logAudit({
         queryOrSector: sector,
         userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
-        toolsInvoked: fallback.evidence.dataSourcesUsed,
-        recordsReadCount: fallback.evidence.recordsEvaluatedCount,
+        toolsInvoked: verifiedFallback.evidence.dataSourcesUsed,
+        recordsReadCount: verifiedFallback.evidence.recordsEvaluatedCount,
         tokensUsedEstimate: 0,
-        confidenceScorePct: fallback.evidence.confidenceScorePct,
+        confidenceScorePct: verifiedFallback.evidence.confidenceScorePct,
         executionStatus: 'fallback_rule_based',
         latencyMs: Date.now() - startTime
       });
 
-      return fallback;
+      return verifiedFallback;
     }
   }
 
   /**
-   * Evaluates Cascading Multi-Hazard Risk across critical infrastructure
+   * Evaluates Cascading Multi-Hazard Risk using dynamic real-world calculation engine (Fix 7)
    */
   public evaluateCascadingRisk(triggerHazard: string = 'torrential_rain') {
     const snapshot = wamsDataStore.getNationalOperationalSnapshot();
 
+    // Extract actual telemetry metrics
+    const maxRainfallObs = snapshot.activeWeatherObservations.reduce((max, obs) => obs.rainfallMm24h > max.rainfallMm24h ? obs : max, snapshot.activeWeatherObservations[0]);
+    const maxWindObs = snapshot.activeWeatherObservations.reduce((max, obs) => obs.windGustKmh > max.windGustKmh ? obs : max, snapshot.activeWeatherObservations[0]);
+    const coastalDam = snapshot.damsStatus.find(d => d.damId === 'DAM-ASST-02') || snapshot.damsStatus[0];
+    const coastalHospital = snapshot.hospitalsReadiness.find(h => h.hospitalId === 'HOSP-TAR-03') || snapshot.hospitalsReadiness[0];
+    const coastalRoad = snapshot.activeRoadHazards.find(r => r.roadId === 'ROAD-TAR-02') || snapshot.activeRoadHazards[0];
+    const coastalPort = snapshot.portConditions.find(p => p.portId === 'PORT-TAR-02') || snapshot.portConditions[0];
+
+    // Real mathematical calculations
+    const rainSeverityFactor = Math.min(1.0, maxRainfallObs.rainfallMm24h / 80.0);
+    const damSurchargeFactor = coastalDam.storagePct / 100.0;
+    const stage1Prob = Math.min(99, Math.round((rainSeverityFactor * 0.6 + damSurchargeFactor * 0.4) * 100));
+
+    const roadClosed = coastalRoad.status.includes('closed');
+    const stage2Prob = roadClosed ? 95 : Math.round(stage1Prob * 0.85);
+
+    const hospitalIcuOccupancyPct = Math.round(((coastalHospital.icuTotal - coastalHospital.icuAvailable) / coastalHospital.icuTotal) * 100);
+    const stage3Prob = Math.min(95, Math.round(stage2Prob * 0.7 + (hospitalIcuOccupancyPct * 0.2)));
+
+    const waveSeverityFactor = Math.min(1.0, coastalPort.waveHeightM / 5.0);
+    const stage4Prob = Math.min(98, Math.round((waveSeverityFactor * 0.7 + rainSeverityFactor * 0.3) * 100));
+
     return {
-      simulationId: `SIM-CASCADE-${Date.now()}`,
+      simulationId: `SIM-CASCADE-DYNAMIC-${Date.now()}`,
       evaluatedAt: new Date().toISOString(),
       primaryTrigger: triggerHazard,
+      dynamicMetrics: {
+        maxRainfallMm: maxRainfallObs.rainfallMm24h,
+        maxWindGustKmh: maxWindObs.windGustKmh,
+        damStoragePct: coastalDam.storagePct,
+        hospitalIcuOccupancyPct,
+        portWaveHeightM: coastalPort.waveHeightM
+      },
       cascadingChain: [
         {
           stage: 1,
-          hazard: 'هطول مطري قياسي (> 70 ملم في طرطوس واللاذقية)',
+          hazard: `هطول مطري قياسي (${maxRainfallObs.rainfallMm24h} ملم في ${maxRainfallObs.stationNameAr})`,
           affectedLayer: 'الشبكة الهيدرولوجية والأودية الساحلية',
-          probabilityPct: 94,
-          dataGrounding: 'محطة طرطوس الميناء (AWS-TAR-05: 72.8 ملم) وسد 16 تشرين (96.5% تخزين)'
+          probabilityPct: stage1Prob,
+          dataGrounding: `رصد محطة ${maxRainfallObs.stationNameAr} (${maxRainfallObs.stationId}: ${maxRainfallObs.rainfallMm24h} ملم) وسد ${coastalDam.damNameAr} (${coastalDam.storagePct}% تخزين)`
         },
         {
           stage: 2,
-          hazard: 'فيضان مجرى السيل وغمر جسر الخراب وادي قنديل بارتفاع 40 سم',
+          hazard: `فيضان مجرى السيل وانسداد معبر ${coastalRoad.segmentAr}`,
           affectedLayer: 'شبكة الطرق والنقل البري',
-          probabilityPct: 88,
-          dataGrounding: 'سجل إغلاق الطريق ROAD-TAR-02'
+          probabilityPct: stage2Prob,
+          dataGrounding: `سجل إغلاق الطريق ${coastalRoad.roadId} (${coastalRoad.reportedHazardAr})`
         },
         {
           stage: 3,
-          hazard: 'عزل قرى وادي قنديل وإعاقة وصول سيارات الإسعاف لمستشفى الباسل بطرطوس',
+          hazard: `عزل المناطق المجاورة وإعاقة وصول سيارات الإسعاف لمستشفى ${coastalHospital.nameAr}`,
           affectedLayer: 'القطاع الصحي والإسعاف الطارئ',
-          probabilityPct: 75,
-          dataGrounding: 'مستشفى الباسل بطرطوس (HOSP-TAR-03) - مسار الشيخ بدر البديل يتطلب 35 دقيقة إضافية'
+          probabilityPct: stage3Prob,
+          dataGrounding: `مستشفى ${coastalHospital.nameAr} (${coastalHospital.hospitalId}: إشغال العناية ${hospitalIcuOccupancyPct}%) - احتياطي أكسجين ${coastalHospital.oxygenReservesHours} ساعة`
         },
         {
           stage: 4,
-          hazard: 'تعطل تصدير الشحنات الزراعية من مرفأ طرطوس بسبب ارتفاع الأمواج (4.2م)',
+          hazard: `تعطل حركة الشحن البحري بمرفأ ${coastalPort.portNameAr} بسبب ارتفاع الأمواج (${coastalPort.waveHeightM}م)`,
           affectedLayer: 'الموانئ والأمن الغذائي الزراعي',
-          probabilityPct: 82,
-          dataGrounding: 'مرفأ طرطوس (PORT-TAR-02) وبساتين الحمضيات الساحلية (AGRI-COAST-02)'
+          probabilityPct: stage4Prob,
+          dataGrounding: `مرفأ ${coastalPort.portNameAr} (${coastalPort.portId}: أمواج ${coastalPort.waveHeightM}م) وبساتين الساحل`
         }
       ],
       interventionsRecommended: [
-        { priority: 1, actionAr: 'توجيه طواقم الدفاع المدني فوراً لتثبيت نقطة إسعاف متقدمة في وادي قنديل قبل انقطاع المعبر بالكامل' },
-        { priority: 2, actionAr: 'تفعيل مسار التحويل الإلزامي لحركة الشاحنات عبر طريق الشيخ بدر وتسيير دوريات مرور' },
-        { priority: 3, actionAr: 'تشغيل مصارف مفيض سد 16 تشرين بشكل تدريجي مدروس لمنع الغمر المباغت للمناطق المنخفضة' }
+        { priority: 1, actionAr: `توجيه طواقم الدفاع المدني فوراً لتثبيت نقطة إسعاف متقدمة في ${coastalRoad.segmentAr} قبل تفاقم المفيض` },
+        { priority: 2, actionAr: `تفعيل مسار التحويل الإلزامي لحركة الشاحنات عبر ${coastalRoad.detourRouteAr} وتسيير دوريات مرور` },
+        { priority: 3, actionAr: `تشغيل مصارف مفيض سد ${coastalDam.damNameAr} بشكل تدريجي مدروس لمنع غمر الأراضي المأهولة` }
       ]
     };
   }
