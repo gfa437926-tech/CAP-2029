@@ -265,7 +265,6 @@ export const WAMSIntelligenceHubView: React.FC = () => {
         body: JSON.stringify({
           prompt: queryToSend,
           sector: sector,
-          userContext: { role: 'operations_officer', governorate: 'اللاذقية' }
         })
       });
 
