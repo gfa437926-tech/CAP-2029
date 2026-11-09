@@ -108,7 +108,7 @@ export function requireAnyApiScopes(...requiredScopes: string[]) {
     }
 
     const granted = new Set<string>([
-      ...(typeof claims.scope === 'string' ? claims.scope.split(/\\s+/).filter(Boolean) : []),
+      ...(typeof claims.scope === 'string' ? claims.scope.split(/\s+/).filter(Boolean) : []),
       ...(Array.isArray(claims.permissions) ? claims.permissions.filter((value): value is string => typeof value === 'string') : [])
     ]);
 
