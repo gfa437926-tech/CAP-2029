@@ -98,3 +98,24 @@ export function requireApiScopes(...requiredScopes: string[]) {
     next();
   };
 }
+
+export function requireAnyApiScopes(...requiredScopes: string[]) {
+  return (_req: Request, res: Response, next: NextFunction): void => {
+    const claims = res.locals.auth as WamsAuthClaims | undefined;
+    if (!claims) {
+      unauthorized(res);
+      return;
+    }
+
+    const granted = new Set<string>([
+      ...(typeof claims.scope === 'string' ? claims.scope.split(/\\s+/).filter(Boolean) : []),
+      ...(Array.isArray(claims.permissions) ? claims.permissions.filter((value): value is string => typeof value === 'string') : [])
+    ]);
+
+    if (!requiredScopes.some(scope => granted.has(scope))) {
+      res.status(403).json({ status: 'error', code: 'FORBIDDEN', message: 'Insufficient permissions' });
+      return;
+    }
+    next();
+  };
+}
