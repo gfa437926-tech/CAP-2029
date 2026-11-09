@@ -26,6 +26,7 @@ import { NationalRegistryView } from './components/views/NationalRegistryView';
 import { NationalDataCatalogueView } from './components/views/NationalDataCatalogueView';
 import { WAMSNationalPortalView } from './components/views/WAMSNationalPortalView';
 import { BaselineAuditAndDecisionsView } from './components/views/BaselineAuditAndDecisionsView';
+import { WAMSIntelligenceHubView } from './components/views/WAMSIntelligenceHubView';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('baseline_audit');
@@ -161,6 +162,11 @@ export default function App() {
           <BaselineAuditAndDecisionsView
             onNavigateToScreen={(s) => setCurrentScreen(s)}
           />
+        )}
+
+        {/* WAMS National AI Intelligence Command Center (Gemini Layer) */}
+        {currentScreen === 'wams_ai_intelligence' && (
+          <WAMSIntelligenceHubView />
         )}
 
         {/* WAMS National Master Portal (Steps 1 to 7) */}

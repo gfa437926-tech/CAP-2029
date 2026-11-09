@@ -26,7 +26,8 @@ import {
   Ban,
   CheckCircle2,
   ShieldAlert,
-  ShieldCheck
+  ShieldCheck,
+  Cpu
 } from 'lucide-react';
 
 export type ScreenId = 
@@ -58,6 +59,7 @@ export type ScreenId =
   | 'qgis_postgis'
   // Stage 1 Engineering & National Portals
   | 'baseline_audit'
+  | 'wams_ai_intelligence'
   | 'national_portal'
   | 'national_registry'
   | 'national_catalogue'
@@ -102,7 +104,8 @@ export const Navigation: React.FC<NavigationProps> = ({
       categoryEn: 'WAMS National Multi-Hazard Platform',
       items: [
         { id: 'baseline_audit' as ScreenId, nameAr: 'تدقيق الأساس والقرار التنفيذي', nameEn: 'Baseline Audit & Priorities', icon: ShieldCheck, isHighlighted: true },
-        { id: 'national_portal' as ScreenId, nameAr: 'بوابة WAMS National (الخطوات 1-7)', nameEn: 'WAMS National Portal (Steps 1-7)', icon: BookOpen, isHighlighted: true },
+        { id: 'wams_ai_intelligence' as ScreenId, nameAr: 'مركز الذكاء الاصطناعي (Gemini 3.8)', nameEn: 'AI Intelligence Hub', icon: Cpu, isHighlighted: true },
+        { id: 'national_portal' as ScreenId, nameAr: 'بوابة WAMS National (الخطوات 1-7)', nameEn: 'WAMS National Portal (Steps 1-7)', icon: BookOpen, isHighlighted: false },
         { id: 'national_registry' as ScreenId, nameAr: 'سجل الأخطار الوطني الشامل (8 أخطار)', nameEn: 'Multi-Hazard Registry (8 Types)', icon: ShieldAlert, isHighlighted: false },
         { id: 'national_catalogue' as ScreenId, nameAr: 'كتالوج شبكات وأصول الرصد (7 شبكات)', nameEn: 'National Data Asset Catalogue', icon: Database, isHighlighted: true },
         { id: 'stage1_deliverables' as ScreenId, nameAr: 'وثائق ومخططات المرحلة 1 (الـ 10 كاملة)', nameEn: 'Stage 1 Deliverables (10 Specs)', icon: Layers, isHighlighted: false },
@@ -192,6 +195,13 @@ export const Navigation: React.FC<NavigationProps> = ({
             className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'baseline_audit' ? 'text-amber-400 font-bold' : ''}`}
           >
             <span>تدقيق الأساس والأولويات</span>
+          </button>
+          <button
+            onClick={() => onNavigate('wams_ai_intelligence')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'wams_ai_intelligence' ? 'text-purple-400 font-bold' : ''}`}
+          >
+            <Cpu className="w-3.5 h-3.5 text-purple-400" />
+            <span>ذكاء Gemini الوطني</span>
           </button>
           <button
             onClick={() => onNavigate('national_portal')}
