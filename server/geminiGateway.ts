@@ -441,14 +441,14 @@ class GeminiGatewayService {
    * Main analytical entry point: Analyzes prompt with Gemini API using Google GenAI SDK
    * with full evidence validation and local tool grounding.
    */
-  public async analyzeWithGrounding(prompt: string, sector: string = 'operations', userContext?: { role: string; governorate: string }): Promise<WAMSStructuredIntelligence> {
+  public async analyzeWithGrounding(prompt: string, sector: string = 'operations', userContext?: { role: string; governorate: string; userId?: string }): Promise<WAMSStructuredIntelligence> {
     const startTime = Date.now();
     const sanitization = this.sanitizeInput(prompt);
 
     if (!sanitization.isSafe) {
       this.logAudit({
         queryOrSector: sector,
-        userId: userContext?.role || 'operator',
+        userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
         toolsInvoked: [],
         recordsReadCount: 0,
