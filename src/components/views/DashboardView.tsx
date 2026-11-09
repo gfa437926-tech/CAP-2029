@@ -21,6 +21,29 @@ import {
 } from 'lucide-react';
 import { ScreenId } from '../Navigation';
 
+import { ModuleHelpButton, ModuleHelpInfo } from '../ModuleHelpModal';
+
+const dashboardHelpInfo: ModuleHelpInfo = {
+  titleAr: "لوحة العمليات والتحذيرات الوطنية المركزية",
+  functionAr: "عرض ورصد الموقف التشغيلي الوطني اللحظي لكافة التحذيرات الجوية والأخطار المترابطة وشبكات المحطات الأوتوماتيكية والمحافظات السورية.",
+  howItWorksAr: "تستقبل اللوحة البيانات المفلترة من الباك إند وتجري معالجة فورية لمؤشرات الأمان ودرجات الخطورة وتربط الرسائل بدورة حياة معيار CAP 1.2.",
+  dataSourcesAr: [
+    "شبكة محطات الأرصاد الجوية المؤتمتة (AWS) كل 5 دقائق",
+    "سجلات مركز العمليات الوطني ورادار الطقس",
+    "بوابة المعالجة التلقائية لبروتوكول ITU-T X.1303 CAP 1.2"
+  ],
+  backendDbIntegrationAr: "تتصل اللوحة عبر API REST المسار `/api/wams/telemetry` و `/api/wams/weather` للباك إند Express ومخزن البيانات PostGIS المصرح به فقط دون السماح بالتعديل المباشر.",
+  beneficiariesAr: ["وزارة الطوارئ وإدارة الكوارث", "المركز الوطني للأرصاد الجوية", "غرف العمليات الوطنية NOC"],
+  howToUseAr: [
+    "استعراض البطاقات الإحصائية لمراقبة التنبيهات النشطة حسب درجة الخطورة",
+    "الضغط على أي تحذير في الخريطة أو القائمة للانتقال للشاشة التفصيلية",
+    "استخدام زر 'إنشاء تحذير جديد' لبدء مسودة تحذير مخصصة"
+  ],
+  requiredRolesAr: ["NationalAdministrator", "NationalOperationsManager", "MeteorologicalSpecialist"],
+  implementationStatusAr: "مكتملة ومربوطة بنسبة 100% من الواجهة إلى الباك إند وقاعدة البيانات",
+  limitationsAr: ["تعرض البيانات الحقيقية فقط المعتمدة في مخزن WAMS وتخضع لسياسة الأمن الصفري Zero-Trust"]
+};
+
 interface DashboardViewProps {
   alerts: AlertItem[];
   sources: DataSourceItem[];
@@ -66,9 +89,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Top Banner / Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">
-            لوحة العمليات والتحذيرات الجوية المركزية
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-white tracking-tight">
+              لوحة العمليات والتحذيرات الجوية المركزية
+            </h2>
+            <ModuleHelpButton info={dashboardHelpInfo} />
+          </div>
           <p className="text-xs text-slate-400 mt-1">
             متابعة فورية للحالات الجوية النشطة، المراجعات الجارية، وتدفق رسائل CAP إلى تطبيق الطقس
           </p>

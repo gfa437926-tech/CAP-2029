@@ -224,9 +224,15 @@ export const WAMSIntelligenceHubView: React.FC = () => {
     triggerSectorAnalysis('meteorology');
   }, []);
 
+  const getAuthHeaders = () => ({
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029',
+    'X-WAMS-Client': 'wams-dashboard-ui'
+  });
+
   const fetchGatewayHealth = async () => {
     try {
-      const res = await fetch('/api/ai/health');
+      const res = await fetch('/api/ai/health', { headers: getAuthHeaders() });
       if (res.ok) {
         const json = await res.json();
         setGatewayStatus(json.gateway);
@@ -244,7 +250,7 @@ export const WAMSIntelligenceHubView: React.FC = () => {
 
   const fetchAuditLogs = async () => {
     try {
-      const res = await fetch('/api/ai/audit-logs');
+      const res = await fetch('/api/ai/audit-logs', { headers: getAuthHeaders() });
       if (res.ok) {
         const json = await res.json();
         setAuditLogs(json.data || []);
@@ -261,11 +267,11 @@ export const WAMSIntelligenceHubView: React.FC = () => {
     try {
       const res = await fetch('/api/ai/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           prompt: queryToSend,
           sector: sector,
-          userContext: { role: 'operations_officer', governorate: 'اللاذقية' }
+          userContext: { role: 'operations_officer', governorate: 'اللاذقية', clearanceLevel: 'restricted' }
         })
       });
 
@@ -288,7 +294,7 @@ export const WAMSIntelligenceHubView: React.FC = () => {
     try {
       const res = await fetch('/api/ai/cascading-risk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ triggerHazard: 'torrential_rain' })
       });
       if (res.ok) {
