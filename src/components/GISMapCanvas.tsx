@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { AlertItem, GeoArea } from '../types/wams';
+import { escapeHtml } from '../utils/sanitize';
 import { 
   Layers, 
   MapPin, 
@@ -208,21 +209,28 @@ export const GISMapCanvas: React.FC<GISMapCanvasProps> = ({
             dashArray: alert.status === 'cancelled' ? '6, 6' : undefined
           });
 
-          // Arabic Tooltip & Popup
+          const safeShortHeadline = escapeHtml(alert.shortHeadlineAr);
+          const safeHeadline = escapeHtml(alert.headlineAr);
+          const safeDescription = escapeHtml(alert.descriptionAr);
+          const safeSafetyInstructions = escapeHtml(alert.safetyInstructionsAr);
+          const safeSeverity = escapeHtml(alert.severity);
+          const safeCode = escapeHtml(alert.code);
+
+          // Arabic Tooltip & Popup (XSS Sanitized)
           polygon.bindTooltip(
             `<div style="font-family: 'IBM Plex Sans Arabic', sans-serif; direction: rtl; text-align: right;">
-              <strong>${alert.shortHeadlineAr}</strong><br/>
-              <span style="font-size: 11px; color: ${strokeColor}; font-weight: bold;">خطورة: ${alert.severity}</span>
+              <strong>${safeShortHeadline}</strong><br/>
+              <span style="font-size: 11px; color: ${strokeColor}; font-weight: bold;">خطورة: ${safeSeverity}</span>
             </div>`,
             { direction: 'top', sticky: true }
           );
 
           polygon.bindPopup(
             `<div style="font-family: 'IBM Plex Sans Arabic', sans-serif; direction: rtl; text-align: right; min-width: 200px;">
-              <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: bold;">${alert.headlineAr}</h4>
-              <p style="margin: 0 0 6px 0; font-size: 11px; color: #475569;">${alert.descriptionAr}</p>
-              <div style="font-size: 11px; margin-bottom: 4px;"><strong>تعليمات السلامة:</strong> ${alert.safetyInstructionsAr}</div>
-              <div style="font-size: 10px; color: #64748b;">المعرف: <code>${alert.code}</code> | الإصدار: v${alert.currentVersion}</div>
+              <h4 style="margin: 0 0 4px 0; font-size: 13px; font-weight: bold;">${safeHeadline}</h4>
+              <p style="margin: 0 0 6px 0; font-size: 11px; color: #475569;">${safeDescription}</p>
+              <div style="font-size: 11px; margin-bottom: 4px;"><strong>تعليمات السلامة:</strong> ${safeSafetyInstructions}</div>
+              <div style="font-size: 10px; color: #64748b;">المعرف: <code>${safeCode}</code> | الإصدار: v${alert.currentVersion}</div>
             </div>`
           );
 

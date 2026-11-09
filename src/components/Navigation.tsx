@@ -24,7 +24,9 @@ import {
   Layers,
   Archive,
   Ban,
-  CheckCircle2
+  CheckCircle2,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 
 export type ScreenId = 
@@ -54,7 +56,11 @@ export type ScreenId =
   | 'api_docs'
   | 'system_health'
   | 'qgis_postgis'
-  // Stage 1 Engineering Portals
+  // Stage 1 Engineering & National Portals
+  | 'baseline_audit'
+  | 'national_portal'
+  | 'national_registry'
+  | 'national_catalogue'
   | 'stage1_deliverables'
   | 'stage1_approval';
 
@@ -68,6 +74,20 @@ interface NavigationProps {
   activeDeliverableTab?: string;
 }
 
+interface NavItem {
+  id: ScreenId;
+  nameAr: string;
+  nameEn: string;
+  icon: React.ElementType;
+  isHighlighted?: boolean;
+}
+
+interface NavSection {
+  categoryAr: string;
+  categoryEn: string;
+  items: NavItem[];
+}
+
 export const Navigation: React.FC<NavigationProps> = ({
   currentScreen,
   onNavigate,
@@ -76,12 +96,16 @@ export const Navigation: React.FC<NavigationProps> = ({
   isDarkMode,
   onToggleTheme
 }) => {
-  const navSections = [
+  const navSections: NavSection[] = [
     {
-      categoryAr: 'مخرجات المرحلة الأولى (Stage 1 Deliverables)',
-      categoryEn: 'Stage 1 Architecture & Design',
+      categoryAr: 'منظومة WAMS National للمخاطر والكوارث',
+      categoryEn: 'WAMS National Multi-Hazard Platform',
       items: [
-        { id: 'stage1_deliverables' as ScreenId, nameAr: 'وثائق ومخططات المرحلة 1 (الـ 10 كاملة)', nameEn: 'Stage 1 Deliverables (10 Specs)', icon: BookOpen, isHighlighted: true },
+        { id: 'baseline_audit' as ScreenId, nameAr: 'تدقيق الأساس والقرار التنفيذي', nameEn: 'Baseline Audit & Priorities', icon: ShieldCheck, isHighlighted: true },
+        { id: 'national_portal' as ScreenId, nameAr: 'بوابة WAMS National (الخطوات 1-7)', nameEn: 'WAMS National Portal (Steps 1-7)', icon: BookOpen, isHighlighted: true },
+        { id: 'national_registry' as ScreenId, nameAr: 'سجل الأخطار الوطني الشامل (8 أخطار)', nameEn: 'Multi-Hazard Registry (8 Types)', icon: ShieldAlert, isHighlighted: false },
+        { id: 'national_catalogue' as ScreenId, nameAr: 'كتالوج شبكات وأصول الرصد (7 شبكات)', nameEn: 'National Data Asset Catalogue', icon: Database, isHighlighted: true },
+        { id: 'stage1_deliverables' as ScreenId, nameAr: 'وثائق ومخططات المرحلة 1 (الـ 10 كاملة)', nameEn: 'Stage 1 Deliverables (10 Specs)', icon: Layers, isHighlighted: false },
         { id: 'stage1_approval' as ScreenId, nameAr: 'بوابة المراجعة والاعتماد للمرحلة 2', nameEn: 'Stage 2 Sign-Off & Approval', icon: CheckCircle2, isHighlighted: true }
       ]
     },
@@ -148,21 +172,45 @@ export const Navigation: React.FC<NavigationProps> = ({
         {/* Zone 1: Single text element wordmark */}
         <div className="flex items-center gap-3">
           <button
-            onClick={() => onNavigate('dashboard')}
+            onClick={() => onNavigate('national_portal')}
             className="text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 hover:text-amber-400 transition-colors flex items-center gap-2"
           >
             <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-red-600 flex items-center justify-center text-slate-950 font-black text-sm">
               W
             </div>
-            <span>WAMS للأرصاد الجوية</span>
+            <span>WAMS National</span>
           </button>
           <span className="hidden lg:inline text-xs text-slate-500 font-mono">
-            نظام إدارة التحذيرات الجوية v1.0
+            المنصة الوطنية للإنذار المبكر وإدارة المخاطر
           </span>
         </div>
 
         {/* Zone 2: 4–5 clean single-line text navigation links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300">
+        <nav className="hidden md:flex items-center gap-4 text-sm font-medium text-slate-300">
+          <button
+            onClick={() => onNavigate('baseline_audit')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'baseline_audit' ? 'text-amber-400 font-bold' : ''}`}
+          >
+            <span>تدقيق الأساس والأولويات</span>
+          </button>
+          <button
+            onClick={() => onNavigate('national_portal')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'national_portal' ? 'text-amber-400 font-bold' : ''}`}
+          >
+            <span>بوابة WAMS National</span>
+          </button>
+          <button
+            onClick={() => onNavigate('national_registry')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'national_registry' ? 'text-amber-400 font-bold' : ''}`}
+          >
+            <span>سجل الأخطار (8)</span>
+          </button>
+          <button
+            onClick={() => onNavigate('national_catalogue')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'national_catalogue' ? 'text-emerald-400 font-bold' : ''}`}
+          >
+            <span>كتالوج الرصد (7)</span>
+          </button>
           <button
             onClick={() => onNavigate('gis_map')}
             className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'gis_map' ? 'text-amber-400 font-bold' : ''}`}
@@ -171,27 +219,15 @@ export const Navigation: React.FC<NavigationProps> = ({
           </button>
           <button
             onClick={() => onNavigate('qgis_postgis')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'qgis_postgis' ? 'text-emerald-400 font-bold' : ''}`}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'qgis_postgis' ? 'text-sky-400 font-bold' : ''}`}
           >
             <span>تكامل QGIS و PostGIS</span>
-          </button>
-          <button
-            onClick={() => onNavigate('stage1_deliverables')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'stage1_deliverables' ? 'text-amber-400 font-bold' : ''}`}
-          >
-            وثائق ومخططات المرحلة 1
           </button>
           <button
             onClick={() => onNavigate('dashboard')}
             className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'dashboard' ? 'text-amber-400 font-bold' : ''}`}
           >
-            لوحة العمليات
-          </button>
-          <button
-            onClick={() => onNavigate('api_docs')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'api_docs' ? 'text-amber-400 font-bold' : ''}`}
-          >
-            تطبيق الطقس (API)
+            <span>لوحة العمليات</span>
           </button>
         </nav>
 

@@ -176,9 +176,20 @@ export const SettingsView: React.FC = () => {
 };
 
 export const LoginView: React.FC<{ onLoginSuccess: () => void }> = ({ onLoginSuccess }) => {
-  const [email, setEmail] = useState<string>('sarah.q@met.gov.sa');
-  const [password, setPassword] = useState<string>('••••••••••••');
-  const [mfaCode, setMfaCode] = useState<string>('842910');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [mfaCode, setMfaCode] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      setLoginError('يرجى إدخال البريد الإلكتروني وكلمة المرور للمتابعة.');
+      return;
+    }
+    setLoginError(null);
+    onLoginSuccess();
+  };
 
   return (
     <div className="min-h-[560px] flex items-center justify-center p-4">
@@ -195,13 +206,21 @@ export const LoginView: React.FC<{ onLoginSuccess: () => void }> = ({ onLoginSuc
           </p>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); onLoginSuccess(); }} className="space-y-4">
+        {loginError && (
+          <div className="p-3 bg-red-950/60 border border-red-500/40 rounded-lg text-xs text-red-200">
+            {loginError}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="text-xs text-slate-400 block mb-1 font-semibold">البريد الإلكتروني المؤسسي:</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@met.gov.sa"
+              required
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
             />
           </div>
@@ -212,16 +231,20 @@ export const LoginView: React.FC<{ onLoginSuccess: () => void }> = ({ onLoginSuc
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••••••"
+              required
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
             />
           </div>
 
           <div>
-            <label className="text-xs text-slate-400 block mb-1 font-semibold">رمز التحقق الثنائي (MFA Token):</label>
+            <label className="text-xs text-slate-400 block mb-1 font-semibold">رمز التحقق الثنائي (MFA Token - اختياري):</label>
             <input
               type="text"
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value)}
+              placeholder="000000"
+              maxLength={6}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-amber-300 focus:outline-none focus:border-amber-500 font-mono tracking-widest text-center"
             />
           </div>

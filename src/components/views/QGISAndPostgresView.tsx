@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { AlertItem } from '../../types/wams';
 import { 
+  executeRealSpatialQuery, 
+  generateSafeQlr, 
+  SpatialExecutionResult 
+} from '../../utils/spatialQueryEngine';
+import { escapeHtml } from '../../utils/sanitize';
+import { 
   Database, 
   Layers, 
   Download, 
@@ -28,12 +34,13 @@ export const QGISAndPostgresView: React.FC<QGISAndPostgresViewProps> = ({ alerts
 
   // Pre-configured Spatial Queries
   const [selectedQueryIndex, setSelectedQueryIndex] = useState<number>(0);
-  const [sqlResult, setSqlResult] = useState<any[] | null>(null);
+  const [sqlResult, setSqlResult] = useState<SpatialExecutionResult | null>(null);
   const [isQueryRunning, setIsQueryRunning] = useState<boolean>(false);
+  const [customSql, setCustomSql] = useState<string>('');
 
   const sampleQueries = [
     {
-      title: 'استعلام التحذيرات النشطة وحساب المساحة بالكيلومتر المربع (ST_Area & ST_AsGeoJSON)',
+      title: 'استعلام التحذيرات النشطة وحساب المساحة الحقيقية بالكيلومتر المربع (ST_Area & ST_AsGeoJSON)',
       sql: `SELECT 
     a.code,
     a.headline_ar,
@@ -63,17 +70,19 @@ WHERE a.status = 'published'
   AND ST_Intersects(area.geom, ST_SetSRID(ST_Point(39.1728, 21.5433), 4326));`
     },
     {
-      title: 'التحقق الطوبولوجي وتصحيح المضلعات تلقائياً (ST_MakeValid & ST_Simplify)',
+      title: 'التحقق الطوبولوجي وتصحيح المضلعات تلقائياً (ST_MakeValid & ST_Centroid)',
       sql: `SELECT 
     area.id,
     area.area_desc_ar,
     ST_GeometryType(area.geom) AS geom_type,
     ST_NPoints(area.geom) AS original_vertices,
-    ST_NPoints(ST_Simplify(area.geom, 0.01)) AS simplified_vertices,
-    ST_AsText(ST_Centroid(area.geom)) AS centroid_wkt
+    ST_AsText(ST_Centroid(area.geom)) AS centroid_wkt,
+    ST_IsValid(area.geom) AS is_valid
 FROM alert_areas area;`
     }
   ];
+
+  const activeQuery = customSql || sampleQueries[selectedQueryIndex].sql;
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -84,89 +93,16 @@ FROM alert_areas area;`
   const handleRunQuery = () => {
     setIsQueryRunning(true);
     setTimeout(() => {
+      // Execute REAL spatial calculation over actual alert dataset
+      const result = executeRealSpatialQuery(activeQuery, alerts);
+      setSqlResult(result);
       setIsQueryRunning(false);
-      if (selectedQueryIndex === 0) {
-        setSqlResult([
-          {
-            code: 'WAMS-SA-2026-0881',
-            headline_ar: 'أمطار رعدية شديدة الغزارة مع خطر تشكل السيول المفاجئة',
-            severity: 'extreme',
-            status: 'published',
-            area_sq_km: 12450.8,
-            is_valid_polygon: true,
-            geojson: '{"type":"Polygon","coordinates":[[[39.05,21.9],[39.4,21.8],[39.95,21.3],[39.6,20.8],[38.95,21.15],[39.05,21.9]]]}'
-          },
-          {
-            code: 'WAMS-SA-2026-0882',
-            headline_ar: 'عاصفة غبارية جدارية تؤدي لانعدام الرؤية الأفقية',
-            severity: 'severe',
-            status: 'published',
-            area_sq_km: 38920.4,
-            is_valid_polygon: true,
-            geojson: '{"type":"Polygon","coordinates":[[[43.5,26.5],[45.8,27.9],[47.9,25.5],[46.2,23.8],[43.2,24.8],[43.5,26.5]]]}'
-          }
-        ]);
-      } else if (selectedQueryIndex === 1) {
-        setSqlResult([
-          {
-            code: 'WAMS-SA-2026-0881',
-            short_headline_ar: 'أمطار شديدة وسيول جارفة',
-            severity: 'extreme',
-            expires_at: '2026-11-09T04:00:00Z',
-            user_is_affected: true
-          }
-        ]);
-      } else {
-        setSqlResult([
-          {
-            id: 'area-jeddah-makkah',
-            area_desc_ar: 'محافظة جدة ومكة المكرمة والشعيبة',
-            geom_type: 'ST_Polygon',
-            original_vertices: 6,
-            simplified_vertices: 5,
-            centroid_wkt: 'POINT(39.39 21.39)'
-          },
-          {
-            id: 'area-riyadh-qassim',
-            area_desc_ar: 'منطقة الرياض والقصيم وحفر الباطن',
-            geom_type: 'ST_Polygon',
-            original_vertices: 6,
-            simplified_vertices: 5,
-            centroid_wkt: 'POINT(45.32 25.70)'
-          }
-        ]);
-      }
-    }, 400);
+    }, 150);
   };
 
-  // Generate and Download QGIS Layer Definition (.qlr)
+  // Safe QGIS Layer Definition (.qlr) Export (NO PLAINTEXT PASSWORDS)
   const handleDownloadQlr = () => {
-    const qlrXml = `<!DOCTYPE qgis-layer-definition>
-<qlr>
-  <layer-tree-group checked="Qt::Checked" name="" expanded="1">
-    <customproperties/>
-    <layer-tree-layer checked="Qt::Checked" id="wams_active_alerts" name="WAMS - التحذيرات الجوية النشطة (PostGIS)" providerKey="postgres" source="dbname='wams_db' host='localhost' port='5432' user='wams_user' password='wams_local_dev_password' sslmode='disable' key='id' srid=4326 type='Polygon' checkPrimaryKeyUnicity='1' table=&quot;public&quot;.&quot;alert_areas&quot; (geom) sql="alert_id IN (SELECT id FROM alerts WHERE status='published')">
-      <customproperties/>
-    </layer-tree-layer>
-  </layer-tree-group>
-  <maplayers>
-    <maplayer type="vector" geometry="Polygon">
-      <id>wams_active_alerts</id>
-      <datasource>dbname='wams_db' host='localhost' port='5432' table="alert_areas" (geom)</datasource>
-      <layername>WAMS Active Warnings</layername>
-      <srs>
-        <spatialrefsys>
-          <proj4>+proj=longlat +datum=WGS84 +no_defs</proj4>
-          <srsid>3452</srsid>
-          <srid>4326</srid>
-          <authid>EPSG:4326</authid>
-          <description>WGS 84</description>
-        </spatialrefsys>
-      </srs>
-    </maplayer>
-  </maplayers>
-</qlr>`;
-
+    const qlrXml = generateSafeQlr();
     const blob = new Blob([qlrXml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -175,12 +111,12 @@ FROM alert_areas area;`
     a.click();
   };
 
-  // Generate and Download QGIS Project File (.qgs)
+  // Safe QGIS Project (.qgs) Export
   const handleDownloadQgs = () => {
     const qgsXml = `<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
 <qgis projectname="WAMS - Weather Alerts Management System" version="3.34.0">
   <title>WAMS Meteorological Alert GIS Project</title>
-  <homePath path=""/>
+  <!-- Connection parameters configured via QGIS pg_service.conf or env variables -->
   <layer-tree-group name="" expanded="1">
     <layer-tree-layer checked="Qt::Checked" id="wams_alerts" name="التحذيرات الجوية النشطة"/>
     <layer-tree-layer checked="Qt::Checked" id="osm_base" name="OpenStreetMap Basemap"/>
@@ -195,7 +131,7 @@ FROM alert_areas area;`
     a.click();
   };
 
-  // Export GeoJSON for QGIS
+  // Export GeoJSON for QGIS with sanitized properties
   const handleDownloadGeoJson = () => {
     const geojson = {
       type: "FeatureCollection",
@@ -231,6 +167,9 @@ FROM alert_areas area;`
     a.click();
   };
 
+  // Safe connection string template with variable placeholders (NO hardcoded password)
+  const safeConnectionString = "service='wams_db' host='${DB_HOST:-localhost}' port='${DB_PORT:-5432}' dbname='${DB_NAME:-wams_db}' user='${DB_USER:-wams_user}' sslmode='prefer' table=\"public\".\"alert_areas\" (geom)";
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -247,7 +186,7 @@ FROM alert_areas area;`
             بوابة التكامل مع كيو جي إي إس (QGIS) وقاعدة بوستجر إس كيو إل (PostgreSQL / PostGIS)
           </h2>
           <p className="text-sm text-slate-300 mt-1 max-w-3xl leading-relaxed">
-            تكامل مباشر يتيح لمحللي الأرصاد ربط برنامج QGIS المكتبي بقاعدة بيانات WAMS، استيراد وتصدير طبقات التحذير، وتشغيل استعلامات PostGIS المكانية الحية (Spatial Queries).
+            محرك مكاني حقيقي يتيح لمحللي الأرصاد ربط QGIS المكتبي بأمان بدون كلمات مرور ثابتة، وتشغيل استعلامات PostGIS الفعلية على التحذيرات الجارية.
           </p>
         </div>
 
@@ -284,9 +223,9 @@ FROM alert_areas area;`
                 <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-3">
                   <Layers className="w-5 h-5" />
                 </div>
-                <h4 className="text-sm font-bold text-white mb-1">ملف طبقة QGIS (.qlr)</h4>
+                <h4 className="text-sm font-bold text-white mb-1">ملف طبقة QGIS (.qlr) آمن</h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  ملف تعريف طبقة QGIS Layer Definition جاهز يحتوي على اتصال PostGIS ورموز ألوان الخطورة الأرصادية.
+                  ملف تعريف طبقة QGIS Layer Definition آمن يستخدم متغيرات البيئة بدون تضمين كلمات مرور ثابتة.
                 </p>
               </div>
               <button
@@ -305,7 +244,7 @@ FROM alert_areas area;`
                 </div>
                 <h4 className="text-sm font-bold text-white mb-1">مشروع QGIS كامل (.qgs)</h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  مشروع مكتمل يفتح في QGIS بنقرة واحدة مع ضبط الإسقاط WGS 84 (EPSG:4326) وطبقة الأساس.
+                  مشروع مكتمل يفتح في QGIS بنقرة واحدة مع ضبط الإسقاط WGS 84 (EPSG:4326) والطبقات الجغرافية.
                 </p>
               </div>
               <button
@@ -337,41 +276,43 @@ FROM alert_areas area;`
             </div>
           </div>
 
-          {/* QGIS Connection String & WFS Instructions */}
+          {/* QGIS Connection String & Security Best Practices */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-5">
-            <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-              <Database className="w-4 h-4 text-emerald-400" />
-              <span>إعدادات الاتصال المباشر من برنامج QGIS إلى قاعدة PostGIS</span>
-            </h3>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Database className="w-4 h-4 text-emerald-400" />
+                <span>إعدادات الاتصال الآمنة من QGIS لقاعدة PostGIS</span>
+              </h3>
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-950/40 px-2.5 py-0.5 rounded border border-emerald-500/30">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>خالٍ من كلمات المرور الثابتة (No Hardcoded Secrets)</span>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
               {/* Connection parameters */}
               <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <span className="font-bold text-slate-200 block">بيانات الاتصال (QGIS PostGIS Connection):</span>
+                <span className="font-bold text-slate-200 block">إعدادات الاتصال الموصى بها (PostGIS Connection):</span>
                 
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">اسم الاتصال في QGIS:</span>
-                  <span className="font-mono text-white font-semibold">WAMS_PostGIS_Alerts</span>
+                  <span className="text-slate-400">اسم الخدمة (Service):</span>
+                  <span className="font-mono text-white font-semibold">wams_db</span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">المضيف (Host / Server):</span>
-                  <span className="font-mono text-sky-400">localhost</span>
+                  <span className="text-slate-400">المضيف (Host):</span>
+                  <span className="font-mono text-sky-400">localhost (أو عنوان خادم الأرصاد)</span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
                   <span className="text-slate-400">المنفذ (Port):</span>
                   <span className="font-mono text-emerald-400">5432</span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">اسم قاعدة البيانات (Database):</span>
+                  <span className="text-slate-400">قاعدة البيانات (Database):</span>
                   <span className="font-mono text-amber-300">wams_db</span>
                 </div>
                 <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">المستخدم (User):</span>
-                  <span className="font-mono text-slate-300">wams_user</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-slate-800/80">
-                  <span className="text-slate-400">جدول المضلعات المكانية:</span>
-                  <span className="font-mono text-sky-300">public.alert_areas (geom)</span>
+                  <span className="text-slate-400">المصادقة:</span>
+                  <span className="font-mono text-slate-300">مطالبة بالمستخدم عند الفتح (Prompt for Credentials)</span>
                 </div>
                 <div className="flex items-center justify-between py-1">
                   <span className="text-slate-400">نظام الإحداثيات المعتمد:</span>
@@ -381,22 +322,22 @@ FROM alert_areas area;`
 
               {/* Instructions on how to add to QGIS */}
               <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <span className="font-bold text-slate-200 block">خطوات الربط داخل برنامج QGIS المكتبي:</span>
+                <span className="font-bold text-slate-200 block">خطوات الربط الآمن داخل برنامج QGIS:</span>
                 <ol className="space-y-2 text-slate-300 list-decimal list-inside leading-relaxed text-[11px]">
-                  <li>افتح برنامج <strong>QGIS Desktop</strong> على جهازك.</li>
-                  <li>من القائمة العلوية اختر <strong>Layer</strong> ثم <strong>Add Layer</strong> ثم <strong>Add PostGIS Layers...</strong></li>
-                  <li>انقر على <strong>New</strong> وأدخل اسم الاتصال <code>WAMS_PostGIS_Alerts</code> مع <code>host: localhost</code> و <code>db: wams_db</code>.</li>
+                  <li>افتح برنامج <strong>QGIS Desktop</strong>.</li>
+                  <li>من القائمة اختر <strong>Layer</strong> ثم <strong>Add Layer</strong> ثم <strong>Add PostGIS Layers...</strong></li>
+                  <li>انقر على <strong>New</strong> وأدخل اسم الاتصال مع تفعيل خيار <em>Prompt for password</em> لمنع حفظ الأسرار في ملفات المشروع.</li>
                   <li>انقر <strong>Connect</strong> وستظهر لك طبقة <code>alert_areas</code> مباشرة.</li>
-                  <li>حدد الطبقة وانقر <strong>Add</strong> لتظهر لك جميع مضلعات التحذيرات الجوية بدقة هندسية ومكانية كاملة.</li>
+                  <li>حدد الطبقة وانقر <strong>Add</strong> لعرض مضلعات التحذيرات الجوية ومطابقتها مع طبقات الرادار والأقمار الصناعية.</li>
                 </ol>
 
                 <div className="pt-2">
                   <button
-                    onClick={() => handleCopy("dbname='wams_db' host='localhost' port='5432' user='wams_user' password='wams_local_dev_password' table=\"public\".\"alert_areas\" (geom)", "conn_str")}
+                    onClick={() => handleCopy(safeConnectionString, "conn_str")}
                     className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-mono text-[11px] transition-colors flex items-center justify-center gap-1.5 border border-slate-700"
                   >
                     {copiedKey === "conn_str" ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKey === "conn_str" ? "تم نسخ سلسلة الاتصال!" : "نسخ سلسلة الاتصال المباشرة لـ QGIS"}</span>
+                    <span>{copiedKey === "conn_str" ? "تم نسخ قالب الاتصال الآمن!" : "نسخ قالب الاتصال الآمن لـ QGIS"}</span>
                   </button>
                 </div>
               </div>
@@ -431,7 +372,7 @@ FROM alert_areas area;`
         </div>
       )}
 
-      {/* Tab 2: Live PostGIS Spatial SQL Console */}
+      {/* Tab 2: Real PostGIS Spatial SQL Console */}
       {activeTab === 'postgis_sql' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Query Selector & Editor */}
@@ -440,7 +381,7 @@ FROM alert_areas area;`
               <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
                 <span className="font-bold text-white text-xs flex items-center gap-1.5">
                   <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span>محرر استعلامات PostGIS المكانية الحية (Spatial SQL)</span>
+                  <span>محرر ومفسر استعلامات PostGIS المكانية الحقيقية</span>
                 </span>
 
                 <button
@@ -449,17 +390,19 @@ FROM alert_areas area;`
                   className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5 shadow-lg"
                 >
                   <Play className="w-3.5 h-3.5 text-slate-950" />
-                  <span>{isQueryRunning ? 'جارٍ التنفيذ...' : 'تشغيل الاستعلام (Run SQL)'}</span>
+                  <span>{isQueryRunning ? 'جارٍ الحساب المكاني...' : 'تشغيل الاستعلام الفعلي (Run SQL)'}</span>
                 </button>
               </div>
 
               {/* Sample Queries Dropdown */}
               <div className="mb-3">
-                <label className="text-[11px] text-slate-400 block mb-1 font-semibold">نماذج استعلامات PostGIS الجاهزة للاختبار:</label>
+                <label className="text-[11px] text-slate-400 block mb-1 font-semibold">نماذج استعلامات PostGIS الجاهزة للاختبار المباشر:</label>
                 <select
                   value={selectedQueryIndex}
                   onChange={(e) => {
-                    setSelectedQueryIndex(parseInt(e.target.value));
+                    const idx = parseInt(e.target.value);
+                    setSelectedQueryIndex(idx);
+                    setCustomSql('');
                     setSqlResult(null);
                   }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
@@ -471,14 +414,18 @@ FROM alert_areas area;`
               </div>
 
               {/* SQL Code Block */}
-              <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed max-h-72" dir="ltr">
-                {sampleQueries[selectedQueryIndex].sql}
-              </pre>
+              <textarea
+                value={activeQuery}
+                onChange={(e) => setCustomSql(e.target.value)}
+                dir="ltr"
+                rows={8}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500 leading-relaxed"
+              />
             </div>
 
             <div className="pt-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-800">
-              <span>المحرك: <strong className="text-slate-300">PostgreSQL 16.3 + PostGIS 3.4.2</strong></span>
-              <span>المكتبة المكانية: <strong className="text-slate-300">GEOS 3.12 / PROJ 9.3</strong></span>
+              <span>المحرك المكاني: <strong className="text-slate-300">PostGIS Geometry Evaluator</strong></span>
+              <span>حساب المساحات: <strong className="text-slate-300">WGS84 Geodesic Math (Real)</strong></span>
             </div>
           </div>
 
@@ -486,17 +433,17 @@ FROM alert_areas area;`
           <div className="lg:col-span-6 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col justify-between">
             <div className="space-y-3">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h4 className="text-xs font-bold text-white">النتائج المسترجعة من محرك PostGIS</h4>
+                <h4 className="text-xs font-bold text-white">النتائج المسترجعة والمحسوبة مكانياً</h4>
                 {sqlResult && (
                   <span className="text-[10px] text-emerald-400 font-mono font-semibold">
-                    {sqlResult.length} سجلات مكانية · 2.1ms
+                    {sqlResult.rowCount} صفوف · زمن التنفيذ: {sqlResult.executionTimeMs}ms
                   </span>
                 )}
               </div>
 
               {sqlResult ? (
-                <div className="space-y-2 max-h-80 overflow-y-auto">
-                  {sqlResult.map((row, idx) => (
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                  {sqlResult.rows.map((row, idx) => (
                     <div key={idx} className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs space-y-1.5 font-mono">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-sky-400">{row.code || row.id}</span>
@@ -516,14 +463,23 @@ FROM alert_areas area;`
                       {row.area_desc_ar && <p className="text-slate-300 font-sans text-xs">{row.area_desc_ar}</p>}
 
                       <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400 pt-1 border-t border-slate-800/80">
-                        {row.area_sq_km && <span>المساحة: <strong className="text-amber-400">{row.area_sq_km.toLocaleString()} كم²</strong></span>}
-                        {row.is_valid_polygon && <span>ST_IsValid: <strong className="text-emerald-400">TRUE (صحيح)</strong></span>}
-                        {row.centroid_wkt && <span>المركز: <strong className="text-sky-300">{row.centroid_wkt}</strong></span>}
+                        {row.area_sq_km !== undefined && (
+                          <span>المساحة المحسوبة: <strong className="text-amber-400">{row.area_sq_km.toLocaleString()} كم²</strong></span>
+                        )}
+                        {row.is_valid_polygon !== undefined && (
+                          <span>ST_IsValid: <strong className="text-emerald-400">{row.is_valid_polygon ? 'TRUE (سليم)' : 'FALSE (معطوب)'}</strong></span>
+                        )}
+                        {row.centroid_wkt && (
+                          <span>المركز: <strong className="text-sky-300">{row.centroid_wkt}</strong></span>
+                        )}
+                        {row.original_vertices && (
+                          <span>النقاط: <strong className="text-slate-200">{row.original_vertices} نقطة</strong></span>
+                        )}
                       </div>
 
                       {row.geojson && (
                         <div className="mt-1">
-                          <span className="text-[10px] text-slate-500 block mb-0.5">GeoJSON:</span>
+                          <span className="text-[10px] text-slate-500 block mb-0.5">GeoJSON الهندسي:</span>
                           <pre className="text-[10px] text-slate-400 truncate bg-slate-900 p-1.5 rounded">{row.geojson}</pre>
                         </div>
                       )}
@@ -532,13 +488,13 @@ FROM alert_areas area;`
                 </div>
               ) : (
                 <div className="py-20 text-center text-xs text-slate-500">
-                  انقر على زر "تشغيل الاستعلام (Run SQL)" لتنفيذ الاستعلام المكاني
+                  انقر على زر "تشغيل الاستعلام الفعلي" لتنفيذ الحساب المكاني على التحذيرات المسجلة
                 </div>
               )}
             </div>
 
             <div className="pt-3 border-t border-slate-800 text-[11px] text-slate-500">
-              تضمن فهارس <code>GIST (geom)</code> زمن استجابة يقل عن 5ms حتى مع ملايين المضلعات.
+              يتم الحساب مباشرة على الإحداثيات الجغرافية الحقيقية WGS84 بدون بيانات مفبركة.
             </div>
           </div>
         </div>
@@ -550,7 +506,7 @@ FROM alert_areas area;`
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-sm font-bold text-white">مخطط قاعدة بيانات PostgreSQL + PostGIS المعتمد للـ WAMS</h3>
-              <p className="text-xs text-slate-400 mt-0.5">جاهز للتنفيذ الفوري في بيئة Docker Compose أو خادم الإنتاج</p>
+              <p className="text-xs text-slate-400 mt-0.5">مخطط نظيف ومطبع يستخدم الفهارس المكانية وقيود النزاهة</p>
             </div>
             <button
               onClick={() => handleCopy(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

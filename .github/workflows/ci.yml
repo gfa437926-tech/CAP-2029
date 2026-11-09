@@ -1,0 +1,76 @@
+name: WAMS CI & Quality Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feat/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint-and-typecheck:
+    name: TypeScript & Linting Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run TypeScript Compile Check
+        run: npm run lint
+
+  automated-tests:
+    name: GIS Map, Security & Export Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Test Suite (Vitest)
+        run: npm run test
+
+      - name: Security Scan (Verify No Hardcoded Passwords in Export Templates)
+        run: |
+          echo "Scanning for plaintext passwords in export generators..."
+          ! grep -rn "wams_local_dev_password" src/utils/spatialQueryEngine.ts
+          ! grep -rn "password=" src/utils/spatialQueryEngine.ts
+
+  build-verification:
+    name: Production Build Verification
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, automated-tests]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Production Assets
+        run: npm run build

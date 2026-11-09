@@ -22,9 +22,13 @@ import { ReportsView, UsersAndRbacView } from './components/views/ReportsAndUser
 import { ApiAndIntegrationsView, SystemHealthView } from './components/views/ApiAndHealthView';
 import { AdminRegionsView, SettingsView, LoginView } from './components/views/AdminRegionsAndSettingsView';
 import { QGISAndPostgresView } from './components/views/QGISAndPostgresView';
+import { NationalRegistryView } from './components/views/NationalRegistryView';
+import { NationalDataCatalogueView } from './components/views/NationalDataCatalogueView';
+import { WAMSNationalPortalView } from './components/views/WAMSNationalPortalView';
+import { BaselineAuditAndDecisionsView } from './components/views/BaselineAuditAndDecisionsView';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<ScreenId>('stage1_deliverables');
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>('baseline_audit');
   const [alerts, setAlerts] = useState<AlertItem[]>(mockAlerts);
   const [sources, setSources] = useState<DataSourceItem[]>(mockDataSources);
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(mockAlerts[0] || null);
@@ -152,6 +156,31 @@ export default function App() {
 
       {/* Main View Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Baseline Audit & Executive Decision Gate (Priority 1 & Priority 2) */}
+        {currentScreen === 'baseline_audit' && (
+          <BaselineAuditAndDecisionsView
+            onNavigateToScreen={(s) => setCurrentScreen(s)}
+          />
+        )}
+
+        {/* WAMS National Master Portal (Steps 1 to 7) */}
+        {currentScreen === 'national_portal' && (
+          <WAMSNationalPortalView
+            onNavigateToScreen={(s) => setCurrentScreen(s)}
+            onProceedToSignOff={() => setCurrentScreen('stage1_approval')}
+          />
+        )}
+
+        {/* National Hazard Registry (8 Hazard Groups) */}
+        {currentScreen === 'national_registry' && (
+          <NationalRegistryView />
+        )}
+
+        {/* National Sensor & Geospatial Data Asset Catalogue */}
+        {currentScreen === 'national_catalogue' && (
+          <NationalDataCatalogueView />
+        )}
+
         {/* Stage 1 Deliverables Hub */}
         {currentScreen === 'stage1_deliverables' && (
           <DeliverablesHubView
@@ -361,16 +390,16 @@ export default function App() {
       {/* Footer bar */}
       <footer className="mt-auto border-t border-slate-900 bg-slate-950 px-6 py-4 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-300">WAMS – Weather Alerts Management System</span>
+          <span className="font-semibold text-slate-300">WAMS National</span>
           <span>·</span>
-          <span>نظام إدارة التحذيرات الجوية</span>
+          <span>المنصة الوطنية للإنذار المبكر وإدارة المخاطر والكوارث</span>
         </div>
         <div className="flex items-center gap-4 text-slate-400 font-mono text-[11px]">
           <span>WMO / OASIS CAP v1.2</span>
           <span>·</span>
-          <span>PostgreSQL + PostGIS</span>
+          <span>OGC API Features / PostGIS</span>
           <span>·</span>
-          <span>REST API /v1</span>
+          <span>Zero-Trust Architecture</span>
         </div>
       </footer>
     </div>
