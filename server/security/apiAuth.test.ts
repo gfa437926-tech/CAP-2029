@@ -100,6 +100,30 @@ describe('WAMS API authentication and authorization', () => {
     expect(response.status).toBe(200);
   });
 
+  it('ignores client-supplied AI identity and audits the verified token subject', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        prompt: 'اختبار ربط هوية المستخدم',
+        sector: 'operations',
+        userContext: { role: 'system_admin', governorate: 'دمشق', userId: 'forged-user' }
+      })
+    });
+    expect(response.status).toBe(200);
+
+    const audit = await fetch(baseUrl + '/api/ai/audit-logs', {
+      headers: { authorization: 'Bearer ' + token(['ai:audit:read']) }
+    });
+    expect(audit.status).toBe(200);
+    const payload = await audit.json() as { data: Array<{ userId: string }> };
+    expect(payload.data[0]?.userId).toBe('test-operator-001');
+    expect(payload.data[0]?.userId).not.toBe('forged-user');
+  });
+
   it('rejects tokens signed by an untrusted key', async () => {
     const { privateKey: attackerKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
