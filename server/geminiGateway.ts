@@ -483,7 +483,7 @@ class GeminiGatewayService {
       const fallbackResult = this.generateGroundedFallbackAnalysis(sector, prompt);
       this.logAudit({
         queryOrSector: sector,
-        userId: userContext?.role || 'operator',
+        userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
         toolsInvoked: fallbackResult.evidence.dataSourcesUsed,
         recordsReadCount: fallbackResult.evidence.recordsEvaluatedCount,
@@ -561,7 +561,7 @@ ${JSON.stringify(snapshot, null, 2)}
 
       this.logAudit({
         queryOrSector: sector,
-        userId: userContext?.role || 'operator',
+        userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
         toolsInvoked: parsed.evidence.dataSourcesUsed,
         recordsReadCount: parsed.evidence.recordsEvaluatedCount,
@@ -579,7 +579,7 @@ ${JSON.stringify(snapshot, null, 2)}
       
       this.logAudit({
         queryOrSector: sector,
-        userId: userContext?.role || 'operator',
+        userId: userContext?.userId || 'authenticated-user',
         clientIp: '127.0.0.1',
         toolsInvoked: fallback.evidence.dataSourcesUsed,
         recordsReadCount: fallback.evidence.recordsEvaluatedCount,
