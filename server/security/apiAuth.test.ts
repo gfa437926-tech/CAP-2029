@@ -16,6 +16,7 @@ function token(scopes: string[], overrides: Record<string, unknown> = {}): strin
   const header = encode({ alg: 'RS256', typ: 'JWT' });
   const payload = encode({
     sub: 'test-operator-001',
+    governorate: 'اللاذقية',
     iss: issuer,
     aud: audience,
     iat: Math.floor(Date.now() / 1000),
@@ -31,7 +32,7 @@ function token(scopes: string[], overrides: Record<string, unknown> = {}): strin
 }
 
 const endpoints: Array<{ method: 'GET' | 'POST'; path: string; scope: string; body?: unknown }> = [
-  { method: 'GET', path: '/api/wams/telemetry', scope: 'wams:telemetry:read' },
+  { method: 'GET', path: '/api/wams/telemetry', scope: 'wams:telemetry:read wams:data:national' },
   { method: 'GET', path: '/api/wams/weather', scope: 'wams:weather:read' },
   { method: 'GET', path: '/api/wams/seismic', scope: 'wams:seismic:read' },
   { method: 'GET', path: '/api/wams/dams', scope: 'wams:dams:read' },
@@ -146,6 +147,28 @@ describe('WAMS API authentication and authorization', () => {
       body: JSON.stringify({ prompt: 'test', sector: 'unknown-sector' })
     });
     expect(response.status).toBe(400);
+  });
+
+
+  it('restricts weather, hospitals, and roads to the verified governorate', async () => {
+    for (const path of ['/api/wams/weather', '/api/wams/hospitals', '/api/wams/roads']) {
+      const own = await fetch(baseUrl + path, {
+        headers: { authorization: 'Bearer ' + token([path.endsWith('weather') ? 'wams:weather:read' : path.endsWith('hospitals') ? 'wams:hospitals:read' : 'wams:roads:read']) }
+      });
+      expect(own.status).toBe(200);
+      const foreign = await fetch(baseUrl + path + '?governorate=دمشق', {
+        headers: { authorization: 'Bearer ' + token([path.endsWith('weather') ? 'wams:weather:read' : path.endsWith('hospitals') ? 'wams:hospitals:read' : 'wams:roads:read']) }
+      });
+      expect(foreign.status).toBe(403);
+      expect((await foreign.json()).code).toBe('GEOGRAPHIC_SCOPE_DENIED');
+    }
+  });
+
+  it('requires an explicit national-data scope for the full telemetry snapshot', async () => {
+    const response = await fetch(baseUrl + '/api/wams/telemetry', {
+      headers: { authorization: 'Bearer ' + token(['wams:telemetry:read']) }
+    });
+    expect(response.status).toBe(403);
   });
 
   it('rejects tokens signed by an untrusted key', async () => {
