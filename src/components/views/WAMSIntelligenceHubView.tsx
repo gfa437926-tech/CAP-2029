@@ -258,13 +258,26 @@ export const WAMSIntelligenceHubView: React.FC = () => {
     setIsLoading(true);
     const queryToSend = customQuery || `قدم تحليلاً استشارياً مدعماً بالأدلة لقطاع ${sectorMetadata[sector].nameAr} استناداً لقواعد بيانات WAMS التشغيلية.`;
 
+    const apiSectorByUiSector: Record<AISectorId, string> = {
+      meteorology: 'meteorology',
+      seismic: 'geological',
+      wildfire: 'wildfire',
+      floods: 'hydrology',
+      health: 'health',
+      agriculture: 'agriculture',
+      aviation: 'aviation',
+      maritime: 'maritime',
+      traffic: 'traffic',
+      operations: 'operations'
+    };
+
     try {
       const res = await fetch('/api/ai/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: queryToSend,
-          sector: sector,
+          sector: apiSectorByUiSector[sector],
         })
       });
 
