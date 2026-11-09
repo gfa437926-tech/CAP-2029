@@ -12,23 +12,43 @@ Only RS256 is accepted. Tokens must contain a non-empty `sub`, matching `iss`, m
 
 ## Least-privilege scopes
 
-| API route | Required scope |
+The following scopes are enforced on all 29 preserved API routes. Where two scopes are listed, both are required.
+
+| API route | Required scope(s) |
 |---|---|
-| GET /api/wams/telemetry | wams:telemetry:read |
+| POST /api/wams/energy/grid-alert | wams:energy:operate + wams:data:national |
+| POST /api/wams/telecom/mesh-resilience | wams:telecom:operate + wams:data:national |
+| POST /api/wams/water/dam-cascade | wams:hydrology:operate + wams:data:national |
+| GET /api/wams/telemetry | wams:telemetry:read + wams:data:national |
+| POST /api/wams/hydrology/flash-flood | wams:hydrology:operate + wams:data:national |
+| POST /api/wams/hydrology/dam-eval | wams:hydrology:operate + wams:data:national |
 | GET /api/wams/weather | wams:weather:read |
-| GET /api/wams/seismic | wams:seismic:read |
-| GET /api/wams/dams | wams:dams:read |
+| GET /api/wams/seismic | wams:seismic:read + wams:data:national |
+| GET /api/wams/dams | wams:dams:read + wams:data:national |
 | GET /api/wams/hospitals | wams:hospitals:read |
+| POST /api/wams/health/hospital-stress | wams:health:operate + wams:data:national |
+| POST /api/wams/health/evacuation-plan | wams:health:operate + wams:data:national |
 | GET /api/wams/roads | wams:roads:read |
-| GET /api/wams/aviation | wams:aviation:read |
-| GET /api/wams/ports | wams:ports:read |
-| GET /api/wams/agriculture | wams:agriculture:read |
+| POST /api/wams/traffic/road-alert | wams:traffic:operate + wams:data:national |
+| POST /api/wams/industrial/hazard-alert | wams:industrial:operate + wams:data:national |
+| GET /api/wams/aviation | wams:aviation:read + wams:data:national |
+| POST /api/wams/aviation/metar-analysis | wams:aviation:operate + wams:data:national |
+| GET /api/wams/ports | wams:maritime:read + wams:data:national |
+| POST /api/wams/maritime/port-alert | wams:maritime:operate + wams:data:national |
+| GET /api/wams/agriculture | wams:agriculture:read + wams:data:national |
+| GET /api/wams/sector/:sectorId | wams:sector:read + wams:data:national |
+| GET /api/wams/spatial-bbox | wams:spatial:read + wams:data:national |
+| POST /api/wams/ingest/weather | wams:weather:ingest + wams:data:national |
+| POST /api/wams/agriculture/frost-risk | wams:agriculture:operate + wams:data:national |
 | POST /api/ai/query | ai:query:<sector> or ai:query:national |
+| POST /api/ai/cascading-risk | ai:cascading-risk:read + wams:data:national |
+| GET /api/ai/audit-logs | ai:audit:read |
+| GET /api/wams/audit-chain/verify | wams:audit:verify |
+| GET /api/ai/health | system:health:read |
 
 AI sector values are restricted to `meteorology`, `geological`, `wildfire`, `hydrology`, `health`, `aviation`, `maritime`, `traffic`, `agriculture`, and `operations`. A sector-specific scope cannot query another sector; `ai:query:national` is an explicitly broader privilege.
-| POST /api/ai/cascading-risk | ai:cascading-risk:read |
-| GET /api/ai/audit-logs | ai:audit:read |
-| GET /api/ai/health | system:health:read |
+
+Weather, hospital, and road list endpoints are restricted to the governorate in the verified token. Requests for another governorate are denied unless the token also has `wams:data:national`. Other cross-governorate or national-wide endpoints require `wams:data:national` explicitly.
 
 Scopes may be supplied in the OIDC `scope` claim (space-delimited) or `permissions` claim (array). The identity provider must issue only the scopes approved for the user's assigned role and organization.
 
