@@ -40,7 +40,7 @@ const endpoints: Array<{ method: 'GET' | 'POST'; path: string; scope: string; bo
   { method: 'GET', path: '/api/wams/aviation', scope: 'wams:aviation:read' },
   { method: 'GET', path: '/api/wams/ports', scope: 'wams:ports:read' },
   { method: 'GET', path: '/api/wams/agriculture', scope: 'wams:agriculture:read' },
-  { method: 'POST', path: '/api/ai/query', scope: 'ai:query', body: { prompt: 'اختبار مصادقة فقط', sector: 'operations' } },
+  { method: 'POST', path: '/api/ai/query', scope: 'ai:query:operations', body: { prompt: 'اختبار مصادقة فقط', sector: 'operations' } },
   { method: 'POST', path: '/api/ai/cascading-risk', scope: 'ai:cascading-risk:read', body: { triggerHazard: 'test' } },
   { method: 'GET', path: '/api/ai/audit-logs', scope: 'ai:audit:read' },
   { method: 'GET', path: '/api/ai/health', scope: 'system:health:read' }
@@ -104,7 +104,7 @@ describe('WAMS API authentication and authorization', () => {
     const response = await fetch(baseUrl + '/api/ai/query', {
       method: 'POST',
       headers: {
-        authorization: 'Bearer ' + token(['ai:query']),
+        authorization: 'Bearer ' + token(['ai:query:operations']),
         'content-type': 'application/json'
       },
       body: JSON.stringify({
@@ -122,6 +122,30 @@ describe('WAMS API authentication and authorization', () => {
     const payload = await audit.json() as { data: Array<{ userId: string }> };
     expect(payload.data[0]?.userId).toBe('test-operator-001');
     expect(payload.data[0]?.userId).not.toBe('forged-user');
+  });
+
+  it('does not let an operations scope query a different sector', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query:operations']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ prompt: 'اختبار صلاحيات القطاع', sector: 'health' })
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects unsupported AI sectors', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query:national']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ prompt: 'test', sector: 'unknown-sector' })
+    });
+    expect(response.status).toBe(400);
   });
 
   it('rejects tokens signed by an untrusted key', async () => {
