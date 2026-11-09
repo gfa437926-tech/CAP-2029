@@ -1,0 +1,6 @@
+{
+  "name": "WAMS - نظام إدارة التحذيرات الجوية",
+  "description": "منصة احترافية متكاملة لإدارة ودورة حياة التحذيرات الجوية ونظم المعلومات الجغرافية GIS ودعم معيار CAP 1.2 مع واجهات برمجة لتطبيقات الطقس",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
