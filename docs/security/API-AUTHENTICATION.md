@@ -23,7 +23,9 @@ Only RS256 is accepted. Tokens must contain a non-empty `sub`, matching `iss`, m
 | GET /api/wams/aviation | wams:aviation:read |
 | GET /api/wams/ports | wams:ports:read |
 | GET /api/wams/agriculture | wams:agriculture:read |
-| POST /api/ai/query | ai:query |
+| POST /api/ai/query | ai:query:<sector> or ai:query:national |
+
+AI sector values are restricted to `meteorology`, `geological`, `wildfire`, `hydrology`, `health`, `aviation`, `maritime`, `traffic`, `agriculture`, and `operations`. A sector-specific scope cannot query another sector; `ai:query:national` is an explicitly broader privilege.
 | POST /api/ai/cascading-risk | ai:cascading-risk:read |
 | GET /api/ai/audit-logs | ai:audit:read |
 | GET /api/ai/health | system:health:read |
