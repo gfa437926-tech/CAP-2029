@@ -193,7 +193,7 @@ describe('WAMS API authentication and authorization', () => {
         'x-wams-auth-token': 'WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029',
         'x-wams-client': 'wams-dashboard-ui',
         'x-user-role': 'NationalAdministrator',
-        'x-user-governorate': 'دمشق',
+        'x-user-governorate': 'Damascus',
         'x-user-clearance': 'top_secret'
       }
     });
