@@ -1,0 +1,223 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { generateKeyPairSync, createSign } from 'node:crypto';
+import express from 'express';
+import type { Server } from 'node:http';
+import { apiRouter } from '../routes';
+
+const issuer = 'https://identity.example.test/';
+const audience = 'wams-api';
+const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+process.env.WAMS_AUTH_PUBLIC_KEY = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+process.env.WAMS_AUTH_ISSUER = issuer;
+process.env.WAMS_AUTH_AUDIENCE = audience;
+
+function token(scopes: string[], overrides: Record<string, unknown> = {}): string {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'RS256', typ: 'JWT' });
+  const payload = encode({
+    sub: 'test-operator-001',
+    governorate: 'اللاذقية',
+    iss: issuer,
+    aud: audience,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 300,
+    scope: scopes.join(' '),
+    ...overrides
+  });
+  const input = header + '.' + payload;
+  const signer = createSign('RSA-SHA256');
+  signer.update(input);
+  signer.end();
+  return input + '.' + signer.sign(privateKey).toString('base64url');
+}
+
+const endpoints: Array<{ method: 'GET' | 'POST'; path: string; scope: string; body?: unknown; expectedStatus?: number }> = [
+  { method: 'POST', path: '/api/wams/energy/grid-alert', scope: 'wams:energy:operate wams:data:national', body: { facilityId: 'test-facility' } },
+  { method: 'POST', path: '/api/wams/telecom/mesh-resilience', scope: 'wams:telecom:operate wams:data:national', body: { nodes: [] } },
+  { method: 'POST', path: '/api/wams/water/dam-cascade', scope: 'wams:hydrology:operate wams:data:national', body: { assessments: [] } },
+  { method: 'GET', path: '/api/wams/telemetry', scope: 'wams:telemetry:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/hydrology/flash-flood', scope: 'wams:hydrology:operate wams:data:national', body: {} },
+  { method: 'POST', path: '/api/wams/hydrology/dam-eval', scope: 'wams:hydrology:operate wams:data:national', body: {} },
+  { method: 'GET', path: '/api/wams/weather', scope: 'wams:weather:read' },
+  { method: 'GET', path: '/api/wams/seismic', scope: 'wams:seismic:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/dams', scope: 'wams:dams:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/hospitals', scope: 'wams:hospitals:read' },
+  { method: 'POST', path: '/api/wams/health/hospital-stress', scope: 'wams:health:operate wams:data:national', body: { hospitalId: 'test' } },
+  { method: 'POST', path: '/api/wams/health/evacuation-plan', scope: 'wams:health:operate wams:data:national', body: { hospitalId: 'test', patientCount: 1 } },
+  { method: 'GET', path: '/api/wams/roads', scope: 'wams:roads:read' },
+  { method: 'POST', path: '/api/wams/traffic/road-alert', scope: 'wams:traffic:operate wams:data:national', body: { roadId: 'test' } },
+  { method: 'POST', path: '/api/wams/industrial/hazard-alert', scope: 'wams:industrial:operate wams:data:national', body: { hazardId: 'test' } },
+  { method: 'GET', path: '/api/wams/aviation', scope: 'wams:aviation:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/aviation/metar-analysis', scope: 'wams:aviation:operate wams:data:national', body: { icaoCode: 'test' } },
+  { method: 'GET', path: '/api/wams/ports', scope: 'wams:maritime:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/maritime/port-alert', scope: 'wams:maritime:operate wams:data:national', body: { portId: 'test' } },
+  { method: 'GET', path: '/api/wams/agriculture', scope: 'wams:agriculture:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/sector/meteorology', scope: 'wams:sector:read wams:data:national' },
+  { method: 'GET', path: '/api/wams/spatial-bbox', scope: 'wams:spatial:read wams:data:national' },
+  { method: 'POST', path: '/api/wams/ingest/weather', scope: 'wams:weather:ingest wams:data:national', body: {}, expectedStatus: 400 },
+  { method: 'POST', path: '/api/wams/agriculture/frost-risk', scope: 'wams:agriculture:operate wams:data:national', body: { zoneId: 'test' } },
+  { method: 'POST', path: '/api/ai/query', scope: 'ai:query:operations', body: { prompt: 'اختبار مصادقة فقط', sector: 'operations' } },
+  { method: 'POST', path: '/api/ai/cascading-risk', scope: 'ai:cascading-risk:read wams:data:national', body: { triggerHazard: 'test' } },
+  { method: 'GET', path: '/api/ai/audit-logs', scope: 'ai:audit:read' },
+  { method: 'GET', path: '/api/wams/audit-chain/verify', scope: 'wams:audit:verify' },
+  { method: 'GET', path: '/api/ai/health', scope: 'system:health:read' }
+];
+
+describe('WAMS API authentication and authorization', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+    server = app.listen(0);
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Test server did not bind a TCP port');
+    baseUrl = 'http://127.0.0.1:' + address.port;
+  });
+
+  afterAll(async () => {
+    if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  });
+
+  it.each(endpoints)('$method $path rejects anonymous requests', async endpoint => {
+    const response = await fetch(baseUrl + endpoint.path, {
+      method: endpoint.method,
+      headers: endpoint.body ? { 'content-type': 'application/json' } : undefined,
+      body: endpoint.body ? JSON.stringify(endpoint.body) : undefined
+    });
+    expect(response.status).toBe(401);
+    expect((await response.json()).code).toBe('UNAUTHENTICATED');
+  });
+
+  it.each(endpoints)('$method $path rejects authenticated users without its scope', async endpoint => {
+    const response = await fetch(baseUrl + endpoint.path, {
+      method: endpoint.method,
+      headers: {
+        authorization: 'Bearer ' + token(['unrelated:read']),
+        ...(endpoint.body ? { 'content-type': 'application/json' } : {})
+      },
+      body: endpoint.body ? JSON.stringify(endpoint.body) : undefined
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json()).code).toBe('FORBIDDEN');
+  });
+
+  it.each(endpoints)('$method $path accepts a valid token with its exact scope', async endpoint => {
+    const response = await fetch(baseUrl + endpoint.path, {
+      method: endpoint.method,
+      headers: {
+        authorization: 'Bearer ' + token([endpoint.scope]),
+        ...(endpoint.body ? { 'content-type': 'application/json' } : {})
+      },
+      body: endpoint.body ? JSON.stringify(endpoint.body) : undefined
+    });
+    expect(response.status).toBe(endpoint.expectedStatus ?? 200);
+  });
+
+  it('ignores client-supplied AI identity and audits the verified token subject', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query:operations']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        prompt: 'اختبار ربط هوية المستخدم',
+        sector: 'operations',
+        userContext: { role: 'system_admin', governorate: 'دمشق', userId: 'forged-user' }
+      })
+    });
+    expect(response.status).toBe(200);
+
+    const audit = await fetch(baseUrl + '/api/ai/audit-logs', {
+      headers: { authorization: 'Bearer ' + token(['ai:audit:read']) }
+    });
+    expect(audit.status).toBe(200);
+    const payload = await audit.json() as { data: Array<{ userId: string }> };
+    expect(payload.data[0]?.userId).toBe('test-operator-001');
+    expect(payload.data[0]?.userId).not.toBe('forged-user');
+  });
+
+  it('does not let an operations scope query a different sector', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query:operations']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ prompt: 'اختبار صلاحيات القطاع', sector: 'health' })
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects unsupported AI sectors', async () => {
+    const response = await fetch(baseUrl + '/api/ai/query', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer ' + token(['ai:query:national']),
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ prompt: 'test', sector: 'unknown-sector' })
+    });
+    expect(response.status).toBe(400);
+  });
+
+
+  it('restricts weather, hospitals, and roads to the verified governorate', async () => {
+    for (const path of ['/api/wams/weather', '/api/wams/hospitals', '/api/wams/roads']) {
+      const own = await fetch(baseUrl + path, {
+        headers: { authorization: 'Bearer ' + token([path.endsWith('weather') ? 'wams:weather:read' : path.endsWith('hospitals') ? 'wams:hospitals:read' : 'wams:roads:read']) }
+      });
+      expect(own.status).toBe(200);
+      const foreign = await fetch(baseUrl + path + '?governorate=دمشق', {
+        headers: { authorization: 'Bearer ' + token([path.endsWith('weather') ? 'wams:weather:read' : path.endsWith('hospitals') ? 'wams:hospitals:read' : 'wams:roads:read']) }
+      });
+      expect(foreign.status).toBe(403);
+      expect((await foreign.json()).code).toBe('GEOGRAPHIC_SCOPE_DENIED');
+    }
+  });
+
+  it('requires an explicit national-data scope for the full telemetry snapshot', async () => {
+    const response = await fetch(baseUrl + '/api/wams/telemetry', {
+      headers: { authorization: 'Bearer ' + token(['wams:telemetry:read']) }
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects legacy static tokens and spoofed identity headers', async () => {
+    const response = await fetch(baseUrl + '/api/wams/telemetry?token=WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029', {
+      headers: {
+        'x-wams-auth-token': 'WAMS-AUTH-TOKEN-PRODUCTION-SECURE-2029',
+        'x-wams-client': 'wams-dashboard-ui',
+        'x-user-role': 'NationalAdministrator',
+        'x-user-governorate': 'Damascus',
+        'x-user-clearance': 'top_secret'
+      }
+    });
+    expect(response.status).toBe(401);
+    expect((await response.json()).code).toBe('UNAUTHENTICATED');
+  });
+
+  it('rejects tokens signed by an untrusted key', async () => {
+    const { privateKey: attackerKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const header = encode({ alg: 'RS256', typ: 'JWT' });
+    const payload = encode({ sub: 'attacker', iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1000) + 300, scope: 'wams:telemetry:read' });
+    const input = header + '.' + payload;
+    const signer = createSign('RSA-SHA256');
+    signer.update(input);
+    signer.end();
+    const forged = input + '.' + signer.sign(attackerKey).toString('base64url');
+    const response = await fetch(baseUrl + '/api/wams/telemetry', { headers: { authorization: 'Bearer ' + forged } });
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects expired tokens', async () => {
+    const expired = token(['wams:telemetry:read'], { exp: Math.floor(Date.now() / 1000) - 1 });
+    const response = await fetch(baseUrl + '/api/wams/telemetry', { headers: { authorization: 'Bearer ' + expired } });
+    expect(response.status).toBe(401);
+  });
+});
