@@ -21,6 +21,7 @@ import { AuditLogView, NotificationsOutboxView } from './components/views/AuditL
 import { ReportsView, UsersAndRbacView } from './components/views/ReportsAndUsersView';
 import { ApiAndIntegrationsView, SystemHealthView } from './components/views/ApiAndHealthView';
 import { AdminRegionsView, SettingsView, LoginView } from './components/views/AdminRegionsAndSettingsView';
+import { QGISAndPostgresView } from './components/views/QGISAndPostgresView';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenId>('stage1_deliverables');
@@ -185,6 +186,11 @@ export default function App() {
             onSelectAlert={(a) => setSelectedAlert(a)}
             onAddNewArea={handleAddPolygonToSelected}
           />
+        )}
+
+        {/* QGIS & PostgreSQL / PostGIS Integration Studio */}
+        {currentScreen === 'qgis_postgis' && (
+          <QGISAndPostgresView alerts={alerts} />
         )}
 
         {/* 3. All Alerts & Status Filtering */}

@@ -53,6 +53,7 @@ export type ScreenId =
   | 'settings'
   | 'api_docs'
   | 'system_health'
+  | 'qgis_postgis'
   // Stage 1 Engineering Portals
   | 'stage1_deliverables'
   | 'stage1_approval';
@@ -119,6 +120,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       categoryAr: 'الجغرافيا ونشر تطبيق الطقس',
       categoryEn: 'GIS & Weather App Distribution',
       items: [
+        { id: 'qgis_postgis' as ScreenId, nameAr: 'تكامل QGIS و PostgreSQL / PostGIS', nameEn: 'QGIS & PostGIS Studio', icon: Database, isHighlighted: true },
         { id: 'admin_regions' as ScreenId, nameAr: 'المناطق والحدود الإدارية', nameEn: 'Admin Boundaries', icon: Globe },
         { id: 'notifications_outbox' as ScreenId, nameAr: 'طابور إشعارات تطبيق الطقس', nameEn: 'Push Outbox Queue', icon: Bell },
         { id: 'api_docs' as ScreenId, nameAr: 'واجهات API وتكامل الطقس', nameEn: 'Weather App API & OpenAPI', icon: Code2 }
@@ -162,6 +164,18 @@ export const Navigation: React.FC<NavigationProps> = ({
         {/* Zone 2: 4–5 clean single-line text navigation links */}
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300">
           <button
+            onClick={() => onNavigate('gis_map')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'gis_map' ? 'text-amber-400 font-bold' : ''}`}
+          >
+            <span>خريطة الـ GIS الحية</span>
+          </button>
+          <button
+            onClick={() => onNavigate('qgis_postgis')}
+            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${currentScreen === 'qgis_postgis' ? 'text-emerald-400 font-bold' : ''}`}
+          >
+            <span>تكامل QGIS و PostGIS</span>
+          </button>
+          <button
             onClick={() => onNavigate('stage1_deliverables')}
             className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'stage1_deliverables' ? 'text-amber-400 font-bold' : ''}`}
           >
@@ -174,22 +188,10 @@ export const Navigation: React.FC<NavigationProps> = ({
             لوحة العمليات
           </button>
           <button
-            onClick={() => onNavigate('gis_map')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'gis_map' ? 'text-amber-400 font-bold' : ''}`}
-          >
-            خريطة الـ GIS
-          </button>
-          <button
-            onClick={() => onNavigate('cap_import')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'cap_import' ? 'text-amber-400 font-bold' : ''}`}
-          >
-            معيار CAP 1.2
-          </button>
-          <button
             onClick={() => onNavigate('api_docs')}
             className={`hover:text-white transition-colors whitespace-nowrap shrink-0 ${currentScreen === 'api_docs' ? 'text-amber-400 font-bold' : ''}`}
           >
-            تكامل تطبيق الطقس
+            تطبيق الطقس (API)
           </button>
         </nav>
 

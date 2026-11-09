@@ -76,15 +76,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => onNavigate('qgis_postgis')}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg text-xs transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Database className="w-4 h-4" />
+            <span>تكامل QGIS و PostGIS</span>
+          </button>
+          <button
             onClick={() => onNavigate('create_alert')}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg text-xs transition-colors flex items-center gap-2 shadow-sm"
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg text-xs transition-colors flex items-center gap-2 shadow-sm"
           >
             <PlusCircle className="w-4 h-4" />
             <span>إنشاء تحذير جديد</span>
           </button>
           <button
             onClick={() => onNavigate('gis_map')}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg text-xs transition-colors border border-slate-700 flex items-center gap-2"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg text-xs transition-colors border border-slate-700 flex items-center gap-2"
           >
             <Activity className="w-4 h-4 text-sky-400" />
             <span>فتح الخريطة الكاملة (GIS)</span>

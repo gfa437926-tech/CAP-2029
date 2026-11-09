@@ -79,7 +79,7 @@ export const GISMapView: React.FC<GISMapViewProps> = ({
             محرر ومستكشف الخرائط الجغرافية (GIS Map Studio)
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            رسم مضلعات التحذيرات الجوية (Polygon)، فحص سلامة الطوبولوجيا، واستعراض طبقات رادار الأمطار والحدود الإدارية
+            خرائط جغرافية حقيقية (Carto Dark · OpenStreetMap · Satellite) مع رسم مضلعات التحذيرات ودعم كامل لبرنامج QGIS وقاعدة PostGIS
           </p>
         </div>
 
@@ -89,7 +89,7 @@ export const GISMapView: React.FC<GISMapViewProps> = ({
             className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
           >
             <Download className="w-3.5 h-3.5 text-sky-400" />
-            <span>تصدير GeoJSON</span>
+            <span>تصدير GeoJSON لـ QGIS</span>
           </button>
         </div>
       </div>
