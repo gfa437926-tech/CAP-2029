@@ -25,7 +25,7 @@ apiRouter.use(authenticateApiRequest);
 
 const hasNationalDataScope = (claims: WamsAuthClaims) => {
   const scopes = new Set([
-    ...(typeof claims.scope === 'string' ? claims.scope.split(/\\s+/).filter(Boolean) : []),
+    ...(typeof claims.scope === 'string' ? claims.scope.split(/\s+/).filter(Boolean) : []),
     ...(Array.isArray(claims.permissions) ? claims.permissions.filter((value): value is string => typeof value === 'string') : [])
   ]);
   return scopes.has('wams:data:national');
